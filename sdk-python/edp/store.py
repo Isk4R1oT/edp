@@ -95,6 +95,11 @@ class DecisionStore:
         (store_dir / "decisions").mkdir(exist_ok=True)
         return cls(store_dir / STORE_DB_FILENAME)
 
+    @property
+    def decisions_dir(self) -> Path:
+        """Default location for the human-readable markdown projection (`.edp/decisions/`)."""
+        return self.db_path.parent / "decisions"
+
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=5.0)
         for pragma in _PRAGMAS:
@@ -171,8 +176,14 @@ class DecisionStore:
         review_due_at_step: Optional[int] = None,
         provisional: bool = False,
         status: Status = "active",
+        project_markdown: bool = True,
     ) -> str:
-        """Create a new decision and return its id."""
+        """Create a new decision and return its id.
+
+        If `project_markdown` is True (default), also writes the human-readable
+        markdown projection to `.edp/decisions/DEC-NNNN.md`. Set False for
+        unit tests that do not care about the projection.
+        """
         dec_id = self.next_id()
         ts = utcnow()
         dec = Decision(
@@ -197,6 +208,8 @@ class DecisionStore:
             provisional=provisional,
         )
         self._write_decision(dec, op="record", actor=actor)
+        if project_markdown:
+            self.export_markdown(dec_id, self.decisions_dir)
         return dec_id
 
     def supersede(
@@ -216,8 +229,13 @@ class DecisionStore:
         alternatives: Optional[list[dict]] = None,
         review_due_at_step: Optional[int] = None,
         provisional: bool = False,
+        project_markdown: bool = True,
     ) -> str:
-        """Atomically supersede an existing decision with a new one."""
+        """Atomically supersede an existing decision with a new one.
+
+        If `project_markdown` is True (default), refreshes both markdown
+        projections — the new active record and the old (now superseded) one.
+        """
         old = self.show(old_id)  # raises DecisionNotFound
         if old.status not in ("active", "proposed", "revised"):
             raise EDPError(
@@ -261,6 +279,9 @@ class DecisionStore:
                 payload=old_updated,
             )
             self._upsert_current(conn, old_updated)
+        if project_markdown:
+            self.export_markdown(new_id, self.decisions_dir)
+            self.export_markdown(old_id, self.decisions_dir)
         return new_id
 
     def show(self, decision_id: str) -> Decision:

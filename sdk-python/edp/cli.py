@@ -73,9 +73,7 @@ def record(
         review_due_at_step=review_due,
         provisional=provisional,
     )
-    # Also export markdown projection
-    decisions_dir = store.db_path.parent / "decisions"
-    store.export_markdown(dec_id, decisions_dir)
+    # store.record() projects markdown automatically (since CRIT-3 fix)
     typer.echo(dec_id)
 
 
@@ -104,9 +102,7 @@ def supersede(
         step=step,
         review_due_at_step=review_due,
     )
-    decisions_dir = store.db_path.parent / "decisions"
-    store.export_markdown(new_id, decisions_dir)
-    store.export_markdown(old_id, decisions_dir)  # update old projection with superseded status
+    # store.supersede() projects both new and old markdown automatically (since CRIT-3 fix)
     typer.echo(new_id)
 
 

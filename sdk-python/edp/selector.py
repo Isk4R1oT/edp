@@ -6,12 +6,15 @@ status + (on-demand) FTS only. Trim policy preserves key_constraints.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
 from edp.models import Decision
 from edp.render import render_snippet, wrap_active_block
-from edp.store import DecisionStore
+from edp.store import DecisionNotFound, DecisionStore
+
+_log = logging.getLogger("edp.selector")
 
 
 # Conservative tokens-per-char ratio. 4 chars ≈ 1 token for English; we are slightly
@@ -77,10 +80,19 @@ def get_active_block(
         for ref_id in referenced_ids:
             try:
                 ref_dec = store.show(ref_id)
-                if ref_dec.status in ("superseded", "revised", "deprecated"):
-                    extras.append(ref_dec)
-            except Exception:
+            except DecisionNotFound:
+                # Supersede pointer references a record that does not exist.
+                # This is a real data-integrity break — log it loudly so the
+                # operator notices, then continue (we cannot render what isn't
+                # there). Other exceptions intentionally propagate.
+                referring = [d.id for d in primary if d.supersedes == ref_id]
+                _log.warning(
+                    "edp.selector.supersede_chain_broken",
+                    extra={"missing_ref": ref_id, "referring_decisions": referring},
+                )
                 continue
+            if ref_dec.status in ("superseded", "revised", "deprecated"):
+                extras.append(ref_dec)
 
     # Step 3 — order: pinned (n/a in v0.1) > recency desc > confidence desc
     def _sort_key(d: Decision) -> tuple:
