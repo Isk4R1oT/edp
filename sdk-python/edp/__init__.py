@@ -6,6 +6,7 @@ Conforms to specification version `edp/2026-05-24`.
 from edp.models import (
     Decision,
     Alternative,
+    Event,
     ReviewEntry,
     RelevanceMatch,
     RelevanceReport,
@@ -18,6 +19,7 @@ from edp.render import render_snippet, render_full_markdown, wrap_active_block
 __all__ = [
     "Decision",
     "Alternative",
+    "Event",
     "ReviewEntry",
     "RelevanceMatch",
     "RelevanceReport",

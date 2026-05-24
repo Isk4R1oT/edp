@@ -89,6 +89,17 @@ class RelevanceReport(BaseModel):
     related: list[RelevanceMatch] = Field(default_factory=list)
 
 
+class Event(BaseModel):
+    """A single immutable event from the append-only log (§7.1)."""
+
+    event_id: int
+    ts: datetime
+    actor: str
+    decision_id: str
+    op: Literal["record", "supersede", "superseded_by", "revise", "deprecate", "reject", "review"]
+    payload: dict
+
+
 def utcnow() -> datetime:
     """Return current UTC time with timezone — never use naive datetimes in EDP."""
     return datetime.now(timezone.utc)

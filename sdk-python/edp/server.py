@@ -175,6 +175,24 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         result = get_active_block(store, version=version_state["n"])
         return result.text
 
+    @mcp.resource("events://recent")
+    def recent_events() -> str:
+        """Last 20 entries from the append-only event log, newest first.
+
+        Use for operator-side inspection of who wrote what and when. The
+        full Decision payload per event is omitted here for brevity; use
+        edp_show(decision_id) for full body.
+        """
+        rows = store.events(limit=20)
+        if not rows:
+            return "(no events)"
+        lines = [
+            f"#{e.event_id:>5}  {e.ts.isoformat(timespec='seconds')}  "
+            f"{e.actor:<22}  {e.op:<14}  {e.decision_id}"
+            for e in rows
+        ]
+        return "\n".join(lines)
+
     return mcp
 
 

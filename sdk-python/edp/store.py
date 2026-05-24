@@ -11,11 +11,13 @@ import json
 import sqlite3
 import time
 from contextlib import contextmanager
+from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Optional
 
 from edp.models import (
     Decision,
+    Event,
     RelevanceMatch,
     RelevanceReport,
     Status,
@@ -25,12 +27,18 @@ from edp.models import (
 DEFAULT_STORE_DIR = ".edp"
 STORE_DB_FILENAME = "store.db"
 
-# Required SQLite pragmas per spec §7.4
+# Current SDK schema version. Bumped when the SQLite schema gains new tables
+# or columns. Migration runner deferred to v0.2; for now we just record the
+# version a freshly initialised store was created under.
+_SDK_SCHEMA_VERSION = 1
+
+# Required SQLite pragmas per spec §7.4. Note: wal_autocheckpoint=1000 is
+# SQLite's default — explicit periodic wal_checkpoint(TRUNCATE) is what
+# actually bounds WAL growth on subprocess crashes (see checkpoint()).
 _PRAGMAS = (
     "PRAGMA journal_mode = WAL",
     "PRAGMA busy_timeout = 5000",
     "PRAGMA synchronous = NORMAL",
-    "PRAGMA wal_autocheckpoint = 1000",
     "PRAGMA foreign_keys = ON",
 )
 
@@ -45,6 +53,7 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 CREATE INDEX IF NOT EXISTS idx_events_decision_id ON events(decision_id);
+CREATE INDEX IF NOT EXISTS idx_events_ts ON events(ts);
 
 CREATE TABLE IF NOT EXISTS decisions_current (
     id        TEXT PRIMARY KEY,
@@ -58,6 +67,11 @@ CREATE INDEX IF NOT EXISTS idx_decisions_status ON decisions_current(status);
 CREATE TABLE IF NOT EXISTS counters (
     name TEXT PRIMARY KEY,
     value INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS schema_version (
+    version INTEGER PRIMARY KEY,
+    applied_at TEXT NOT NULL
 );
 
 CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
@@ -118,6 +132,26 @@ class DecisionStore:
                 conn.execute(
                     "INSERT INTO counters(name, value) VALUES('last_decision_id', 0)"
                 )
+            # Record schema version on first init. Idempotent — if this row
+            # already exists we don't overwrite (preserves the original init ts).
+            conn.execute(
+                "INSERT OR IGNORE INTO schema_version(version, applied_at) VALUES (?, ?)",
+                (_SDK_SCHEMA_VERSION, utcnow().isoformat()),
+            )
+
+    def checkpoint(self, *, truncate: bool = True) -> None:
+        """Force a WAL checkpoint to bound write-ahead-log file growth.
+
+        A long-lived owner process (the MCP server, a daemon) SHOULD call
+        this periodically (e.g. every 60s) so that even if a subprocess
+        crashes mid-write the WAL is bounded. Short-lived processes do
+        not need to call this — they exit too quickly to grow the WAL.
+
+        With truncate=True (default) the WAL file is reset to zero bytes.
+        """
+        mode = "TRUNCATE" if truncate else "PASSIVE"
+        with self._connect() as conn:
+            conn.execute(f"PRAGMA wal_checkpoint({mode})")
 
     @contextmanager
     def _write_txn(self) -> Iterator[sqlite3.Connection]:
@@ -149,15 +183,24 @@ class DecisionStore:
     # ── Public API ────────────────────────────────────────────────────────────
 
     def next_id(self) -> str:
-        """Reserve the next sequential decision id."""
+        """Reserve the next sequential decision id (own transaction).
+
+        Most callers should not use this directly — record() and supersede()
+        allocate the id inside the same write transaction as the actual write,
+        which prevents the cross-process recency-ordering race that two
+        separate transactions allow.
+        """
         with self._write_txn() as conn:
-            conn.execute(
-                "UPDATE counters SET value = value + 1 WHERE name='last_decision_id'"
-            )
-            row = conn.execute(
-                "SELECT value FROM counters WHERE name='last_decision_id'"
-            ).fetchone()
-            return f"DEC-{row['value']:04d}"
+            return self._next_id_within_txn(conn)
+
+    def _next_id_within_txn(self, conn: sqlite3.Connection) -> str:
+        conn.execute(
+            "UPDATE counters SET value = value + 1 WHERE name='last_decision_id'"
+        )
+        row = conn.execute(
+            "SELECT value FROM counters WHERE name='last_decision_id'"
+        ).fetchone()
+        return f"DEC-{row['value']:04d}"
 
     def record(
         self,
@@ -183,31 +226,37 @@ class DecisionStore:
         If `project_markdown` is True (default), also writes the human-readable
         markdown projection to `.edp/decisions/DEC-NNNN.md`. Set False for
         unit tests that do not care about the projection.
+
+        Id allocation + event append + read-model upsert happen inside one
+        write transaction, which prevents the cross-process recency-ordering
+        race that two separate transactions would allow.
         """
-        dec_id = self.next_id()
         ts = utcnow()
-        dec = Decision(
-            id=dec_id,
-            title=title,
-            status=status,
-            created_at_step=step,
-            created_at_ts=ts,
-            created_by=actor,
-            decision=decision,
-            evidence=evidence or [],
-            tags=tags or [],
-            confidence=confidence,
-            key_constraints=key_constraints or [],
-            context=context,
-            consequences=consequences or [],
-            alternatives=[
-                {"label": a["label"], "rejected_because": a["rejected_because"]}
-                for a in (alternatives or [])
-            ],
-            review_due_at_step=review_due_at_step,
-            provisional=provisional,
-        )
-        self._write_decision(dec, op="record", actor=actor)
+        with self._write_txn() as conn:
+            dec_id = self._next_id_within_txn(conn)
+            dec = Decision(
+                id=dec_id,
+                title=title,
+                status=status,
+                created_at_step=step,
+                created_at_ts=ts,
+                created_by=actor,
+                decision=decision,
+                evidence=evidence or [],
+                tags=tags or [],
+                confidence=confidence,
+                key_constraints=key_constraints or [],
+                context=context,
+                consequences=consequences or [],
+                alternatives=[
+                    {"label": a["label"], "rejected_because": a["rejected_because"]}
+                    for a in (alternatives or [])
+                ],
+                review_due_at_step=review_due_at_step,
+                provisional=provisional,
+            )
+            self._append_event(conn, op="record", decision_id=dec_id, actor=actor, payload=dec)
+            self._upsert_current(conn, dec)
         if project_markdown:
             self.export_markdown(dec_id, self.decisions_dir)
         return dec_id
@@ -241,34 +290,32 @@ class DecisionStore:
             raise EDPError(
                 f"Cannot supersede {old_id} — status is {old.status!r}, must be active|proposed|revised"
             )
-        new_id = self.next_id()
         ts = utcnow()
-        new = Decision(
-            id=new_id,
-            title=title,
-            status="active",
-            created_at_step=step,
-            created_at_ts=ts,
-            created_by=actor,
-            decision=decision,
-            evidence=evidence or [],
-            tags=tags or old.tags,
-            confidence=confidence,
-            supersedes=old_id,
-            key_constraints=key_constraints or [],
-            context=context,
-            consequences=consequences or [],
-            alternatives=[
-                {"label": a["label"], "rejected_because": a["rejected_because"]}
-                for a in (alternatives or [])
-            ],
-            review_due_at_step=review_due_at_step,
-            provisional=provisional,
-        )
-        # Update old record's superseded_by + status
-        old_updated = old.model_copy(update={"status": "superseded", "superseded_by": new_id})
-
         with self._write_txn() as conn:
+            new_id = self._next_id_within_txn(conn)
+            new = Decision(
+                id=new_id,
+                title=title,
+                status="active",
+                created_at_step=step,
+                created_at_ts=ts,
+                created_by=actor,
+                decision=decision,
+                evidence=evidence or [],
+                tags=tags or old.tags,
+                confidence=confidence,
+                supersedes=old_id,
+                key_constraints=key_constraints or [],
+                context=context,
+                consequences=consequences or [],
+                alternatives=[
+                    {"label": a["label"], "rejected_because": a["rejected_because"]}
+                    for a in (alternatives or [])
+                ],
+                review_due_at_step=review_due_at_step,
+                provisional=provisional,
+            )
+            old_updated = old.model_copy(update={"status": "superseded", "superseded_by": new_id})
             self._append_event(conn, op="supersede", decision_id=new_id, actor=actor, payload=new)
             self._upsert_current(conn, new)
             self._append_event(
@@ -337,6 +384,55 @@ class DecisionStore:
             if d.review_due_at_step is not None and d.review_due_at_step <= step
         ]
 
+    def events(
+        self,
+        *,
+        decision_id: Optional[str] = None,
+        since: Optional[datetime] = None,
+        limit: int = 100,
+    ) -> list[Event]:
+        """Read from the append-only event log, newest first.
+
+        - decision_id: only events for this DEC-NNNN
+        - since: only events with ts > since (must be timezone-aware)
+        - limit: max events returned; default 100
+        """
+        wheres: list[str] = []
+        params: list = []
+        if decision_id is not None:
+            wheres.append("decision_id = ?")
+            params.append(decision_id)
+        if since is not None:
+            wheres.append("ts > ?")
+            params.append(since.isoformat())
+        where_sql = ("WHERE " + " AND ".join(wheres)) if wheres else ""
+        sql = (
+            "SELECT event_id, ts, actor, decision_id, op, payload "
+            f"FROM events {where_sql} ORDER BY event_id DESC LIMIT ?"
+        )
+        params.append(limit)
+        with self._connect() as conn:
+            rows = conn.execute(sql, params).fetchall()
+        out: list[Event] = []
+        for r in rows:
+            try:
+                payload = json.loads(r["payload"])
+            except json.JSONDecodeError:
+                # Storage payload should always be JSON we wrote ourselves;
+                # log structurally if not.
+                payload = {"_corrupt_payload": r["payload"][:200]}
+            out.append(
+                Event(
+                    event_id=r["event_id"],
+                    ts=datetime.fromisoformat(r["ts"]),
+                    actor=r["actor"],
+                    decision_id=r["decision_id"],
+                    op=r["op"],
+                    payload=payload,
+                )
+            )
+        return out
+
     def check(self, planned_action: str, *, limit: int = 5) -> RelevanceReport:
         """Soft check — return active decisions relevant to a planned action.
 
@@ -373,11 +469,6 @@ class DecisionStore:
         return RelevanceReport(related=matches)
 
     # ── Internal helpers ──────────────────────────────────────────────────────
-
-    def _write_decision(self, dec: Decision, *, op: str, actor: str) -> None:
-        with self._write_txn() as conn:
-            self._append_event(conn, op=op, decision_id=dec.id, actor=actor, payload=dec)
-            self._upsert_current(conn, dec)
 
     def _append_event(
         self,
@@ -449,7 +540,7 @@ def _fts_sanitise(text: str) -> str:
     return " OR ".join(f'"{w}"' for w in keep[:8])
 
 
-def _build_why(dec, planned_action: str) -> str:
+def _build_why(dec: Decision, planned_action: str) -> str:
     """Produce a short human-readable rationale for relevance."""
     action_words = {w.lower() for w in planned_action.split() if len(w) >= 4}
     matches = []

@@ -182,6 +182,35 @@ def due(
 
 
 @app.command()
+def events(
+    decision_id: Optional[str] = typer.Option(None, "--decision", help="Filter to one decision"),
+    limit: int = typer.Option(20, "--limit", min=1, max=1000),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Read from the append-only event log, newest first."""
+    store = _store(store_path)
+    rows = store.events(decision_id=decision_id, limit=limit)
+    if not rows:
+        typer.echo("(no events)")
+        return
+    for e in rows:
+        typer.echo(
+            f"#{e.event_id:>5}  {e.ts.isoformat(timespec='seconds')}  "
+            f"{e.actor:<22}  {e.op:<14}  {e.decision_id}"
+        )
+
+
+@app.command()
+def checkpoint(
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Force a WAL checkpoint (TRUNCATE). Long-lived owners should call periodically."""
+    store = _store(store_path)
+    store.checkpoint(truncate=True)
+    typer.echo("OK")
+
+
+@app.command()
 def serve(
     store_path: Optional[str] = typer.Option(None, "--store"),
 ) -> None:

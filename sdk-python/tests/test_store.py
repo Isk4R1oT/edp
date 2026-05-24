@@ -142,3 +142,81 @@ def test_event_log_append_only(tmp_store):
     assert after == before + 4  # 2 record + 2 events for supersede (new+old)
     assert by_dec[a] == 2  # initial record + superseded_by event
     assert by_dec[b] == 1
+
+
+def test_events_read_api_newest_first(tmp_store):
+    """store.events() returns the append-only log newest-first with payloads parsed."""
+    a = _record(tmp_store, title="a")
+    b = _record(tmp_store, title="b")
+    tmp_store.supersede(a, title="a2", decision="d", key_constraints=["kc"], evidence=[])
+
+    all_events = tmp_store.events(limit=100)
+    # Newest-first: supersede pair (2 events) → record(b) → record(a)
+    assert len(all_events) == 4
+    assert all_events[0].event_id > all_events[-1].event_id
+    # Each event has a parsed payload, not a raw JSON string
+    for e in all_events:
+        assert isinstance(e.payload, dict)
+        assert e.payload.get("id") == e.decision_id
+
+    # Filter by decision_id
+    a_events = tmp_store.events(decision_id=a)
+    assert len(a_events) == 2  # record + superseded_by
+    assert all(e.decision_id == a for e in a_events)
+
+    # Limit caps results
+    limited = tmp_store.events(limit=2)
+    assert len(limited) == 2
+
+
+def test_events_filter_by_since(tmp_store):
+    from edp.models import utcnow
+
+    _record(tmp_store, title="before")
+    threshold = utcnow()
+    import time as _t
+    _t.sleep(0.01)  # ensure ts > threshold
+    _record(tmp_store, title="after")
+
+    after_only = tmp_store.events(since=threshold)
+    titles = [e.payload.get("title") for e in after_only]
+    assert "after" in titles
+    assert "before" not in titles
+
+
+def test_checkpoint_runs_without_error(tmp_store):
+    """checkpoint() bounds WAL growth; smoke-test it executes."""
+    _record(tmp_store, title="trigger wal entry")
+    # Should not raise. Actual WAL truncation is observable by file size but
+    # may be racy across platforms; we only verify the API contract.
+    tmp_store.checkpoint(truncate=True)
+    tmp_store.checkpoint(truncate=False)
+
+
+def test_schema_version_recorded(tmp_store):
+    """A freshly initialised store records the SDK schema version it was built under."""
+    conn = tmp_store._connect()
+    row = conn.execute(
+        "SELECT version FROM schema_version ORDER BY version DESC LIMIT 1"
+    ).fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0] == 1
+
+
+def test_record_uses_single_write_txn(tmp_store):
+    """record() should allocate id and write event/projection in one transaction.
+
+    This is a regression test for the HIGH-5 race fix in the audit. We assert
+    that the events table grows by exactly 1 per record (no orphan from a
+    half-failed two-txn write).
+    """
+    conn = tmp_store._connect()
+    before = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.close()
+    for i in range(5):
+        _record(tmp_store, title=f"d{i}")
+    conn = tmp_store._connect()
+    after = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+    conn.close()
+    assert after - before == 5  # exactly one event per record

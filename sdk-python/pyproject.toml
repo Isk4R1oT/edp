@@ -21,24 +21,24 @@ classifiers = [
 ]
 
 dependencies = [
-  "fastmcp>=3.0",
-  "pydantic>=2.0",
-  "typer>=0.12",
+  "fastmcp>=3.3,<4.0",
+  "pydantic>=2.0,<3.0",
+  "typer>=0.12,<1.0",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0",
+  "pytest>=8.0,<10.0",
   "pytest-asyncio",
   "ruff",
   "mypy",
 ]
 langgraph = [
-  "langchain>=1.0",
-  "langgraph>=0.2",
+  "langchain>=1.1,<2.0",
+  "langgraph>=0.2,<1.0",
 ]
 pydantic-ai = [
-  "pydantic-ai>=0.0.13",
+  "pydantic-ai>=0.0.13,<1.0",
 ]
 
 [project.scripts]

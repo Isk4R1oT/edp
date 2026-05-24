@@ -332,7 +332,6 @@ Every implementation MUST apply these pragmas on every connection:
 PRAGMA journal_mode = WAL;            -- allow concurrent readers + one writer
 PRAGMA busy_timeout = 5000;           -- 5s grace before SQLITE_BUSY (Python default is 0)
 PRAGMA synchronous = NORMAL;          -- full sync is overkill for append-only events
-PRAGMA wal_autocheckpoint = 1000;     -- bound WAL growth if a subprocess crashes mid-write
 PRAGMA foreign_keys = ON;             -- enforce referential integrity on supersede chains
 ```
 
@@ -341,8 +340,11 @@ Every write transaction MUST:
 - Be wrapped in a retry-with-backoff loop (2–3 retries, 50ms initial, exponential).
 - Complete in sub-millisecond time. Long-running aggregations belong in read connections.
 - Use `BEGIN IMMEDIATE` (not `BEGIN DEFERRED`) so contention surfaces at transaction start, not at first write.
+- Allocate the new decision id (via the `last_decision_id` counter) **inside the same transaction** as the corresponding event append + read-model upsert. Splitting id allocation into a separate transaction creates a cross-process race that can invert recency ordering.
 
-A single long-lived "checkpoint owner" (typically the MCP server / middleware) SHOULD run periodic `PRAGMA wal_checkpoint(TRUNCATE)` to bound WAL file growth even when subprocess writers do not exit cleanly.
+A long-lived owner process (the MCP server, a middleware daemon) SHOULD additionally call `PRAGMA wal_checkpoint(TRUNCATE)` periodically — every 60 seconds is a safe default. This bounds the WAL file when short-lived subprocess writers (e.g. Claude Code hook scripts) crash mid-write. Reference implementations expose this as `store.checkpoint(truncate=True)`. Short-lived processes do not need to checkpoint — they exit before the WAL can grow.
+
+Note: setting `PRAGMA wal_autocheckpoint = 1000` is a no-op (it is SQLite's default); explicit periodic checkpoint from a long-lived owner is the only reliable bound on WAL growth under subprocess-crash patterns.
 
 References: [SQLite concurrent writes and busy errors](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/), [Abusing SQLite to handle concurrency](https://blog.skypilot.co/abusing-sqlite-to-handle-concurrency/).
 
