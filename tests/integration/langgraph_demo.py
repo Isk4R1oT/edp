@@ -48,6 +48,56 @@ def _last_text(messages) -> str:
     return getattr(m, "content", str(m))
 
 
+def _msg_kind(m) -> str:
+    cls = m.__class__.__name__
+    return cls.replace("Message", "")
+
+
+def trace(messages, start_idx: int = 0, label: str = "") -> None:
+    """Pretty-print every message in the conversation slice for transparency.
+
+    Shows: kind, tool_call_id (if any), content (truncated to 600 chars),
+    and any tool_calls the message issues. This is the receipt — what the
+    agent saw, what it produced, and exactly which tools it invoked.
+    """
+    if label:
+        print(f"\n--- MESSAGE TRACE {label} (messages[{start_idx}:]) ---")
+    for i, m in enumerate(messages[start_idx:], start=start_idx):
+        kind = _msg_kind(m)
+        content = getattr(m, "content", "")
+        if isinstance(content, list):
+            # Some message types use a list-of-parts format
+            parts = []
+            for p in content:
+                if isinstance(p, dict):
+                    parts.append(p.get("text") or json.dumps(p, ensure_ascii=False))
+                else:
+                    parts.append(str(p))
+            content = " ".join(parts)
+        content_short = (content or "").strip().replace("\n", "\n    ")
+        if len(content_short) > 600:
+            content_short = content_short[:600] + " […truncated]"
+
+        header = f"[{i:>2}] {kind}"
+        tcid = getattr(m, "tool_call_id", None)
+        if tcid:
+            header += f"  (tool_call_id={tcid[:12]}…)"
+        name = getattr(m, "name", None)
+        if name:
+            header += f"  (name={name})"
+
+        print(header)
+        if content_short:
+            print(f"    content: {content_short}")
+
+        tcs = getattr(m, "tool_calls", None) or []
+        for tc in tcs:
+            args_json = json.dumps(tc["args"], ensure_ascii=False)
+            if len(args_json) > 400:
+                args_json = args_json[:400] + " […]"
+            print(f"    → TOOL CALL: {tc['name']}({args_json})")
+
+
 def main() -> int:
     key = os.environ.get("OPENROUTER_API_KEY")
     if not key:
@@ -160,11 +210,9 @@ def main() -> int:
     final1 = _last_text(result1["messages"])
     tcs1 = _collect_tool_calls(result1["messages"])
 
+    trace(result1["messages"], start_idx=0, label="TURN 1 full")
     print("\n--- Final answer (truncated to 800 chars) ---")
     print(final1[:800])
-    print("\n--- Tool calls observed ---")
-    for n, a in tcs1:
-        print(f"  • {n}({json.dumps(a, ensure_ascii=False)[:160]})")
 
     t1_cited = [d for d in (dec1, dec2) if d in final1]
     t1_check = any(n == "edp_check" for n, _ in tcs1)
@@ -200,11 +248,9 @@ def main() -> int:
     final2 = _last_text(result2["messages"])
     tcs2 = _collect_tool_calls(result2["messages"], start_idx=len(result1["messages"]))
 
+    trace(result2["messages"], start_idx=len(result1["messages"]), label="TURN 2 delta")
     print("\n--- Final answer (truncated to 800 chars) ---")
     print(final2[:800])
-    print("\n--- Tool calls observed ---")
-    for n, a in tcs2:
-        print(f"  • {n}({json.dumps(a, ensure_ascii=False)[:160]})")
 
     t2_violated = any(
         f"{api}(" in final2 and final2.count(f"{api}(") > final2.count(f"NOT {api}")
@@ -243,11 +289,9 @@ def main() -> int:
     final3 = _last_text(result3["messages"])
     tcs3 = _collect_tool_calls(result3["messages"], start_idx=len(result2["messages"]))
 
+    trace(result3["messages"], start_idx=len(result2["messages"]), label="TURN 3 delta")
     print("\n--- Final answer (truncated to 800 chars) ---")
     print(final3[:800])
-    print("\n--- Tool calls observed ---")
-    for n, a in tcs3:
-        print(f"  • {n}({json.dumps(a, ensure_ascii=False)[:160]})")
 
     t3_show = any(n == "edp_show" and a.get("decision_id") == dec2 for n, a in tcs3)
     # Did the agent surface details only available in the full body?
@@ -280,11 +324,9 @@ def main() -> int:
     final4 = _last_text(result4["messages"])
     tcs4 = _collect_tool_calls(result4["messages"], start_idx=len(result3["messages"]))
 
+    trace(result4["messages"], start_idx=len(result3["messages"]), label="TURN 4 delta")
     print("\n--- Final answer (truncated to 800 chars) ---")
     print(final4[:800])
-    print("\n--- Tool calls observed ---")
-    for n, a in tcs4:
-        print(f"  • {n}({json.dumps(a, ensure_ascii=False)[:160]})")
 
     record_calls = [(n, a) for n, a in tcs4 if n == "edp_record"]
     t4_record = bool(record_calls)
@@ -301,6 +343,76 @@ def main() -> int:
         "pass": t4_record and t4_constraints_ok,
     })
     print(f"\nVERDICT: edp_record={t4_record}, constraints_capture_intent={t4_constraints_ok}, PASS={t4_record and t4_constraints_ok}")
+
+    # ── Turn 5: MULTI-TOOL COMPOSITION (check → show in one turn) ───────────
+    user_turn_5 = (
+        "I want to convert the orders API endpoint from JSON to a custom XML "
+        "format because a downstream consumer requested it. Before I do, "
+        "check whether this conflicts with any active decision, AND if it "
+        "does, fetch the full body of that decision so I can quote the rationale "
+        "to the consumer."
+    )
+    banner("TURN 5 — MULTI-TOOL COMPOSITION (check → show, one turn)")
+    print(f"User: {user_turn_5}")
+
+    # Pre-seed a fifth decision that should be flagged by check()
+    dec_xml = store.record(
+        title="All new endpoints expose only JSON, no XML",
+        decision=(
+            "Legacy XML endpoints stay until separately deprecated; new "
+            "endpoints expose only JSON via response_class=JSONResponse. "
+            "Rationale: zero consumer signal for XML in 90-day analytics "
+            "window; maintaining the second serialiser path is dead weight."
+        ),
+        key_constraints=[
+            "no XML serialisation in new endpoints",
+            "response_class=JSONResponse",
+        ],
+        evidence=["@analytics/endpoint_usage_90d.csv"],
+        tags=["api", "serialisation"],
+        confidence=0.9,
+        actor="human:igor",
+    )
+
+    block_v5 = get_active_block(store, version=5)
+    convo = list(result4["messages"]) + [
+        SystemMessage(content=block_v5.text),
+        HumanMessage(content=user_turn_5),
+    ]
+    result5 = agent.invoke({"messages": convo}, config={"recursion_limit": 25})
+    final5 = _last_text(result5["messages"])
+    tcs5 = _collect_tool_calls(result5["messages"], start_idx=len(result4["messages"]))
+
+    trace(result5["messages"], start_idx=len(result4["messages"]), label="TURN 5 delta")
+    print("\n--- Final answer (truncated to 800 chars) ---")
+    print(final5[:800])
+
+    t5_check_called = any(n == "edp_check" for n, _ in tcs5)
+    t5_show_called = any(n == "edp_show" for n, _ in tcs5)
+    t5_show_target_correct = any(
+        n == "edp_show" and a.get("decision_id") == dec_xml for n, a in tcs5
+    )
+    t5_quoted_rationale = (
+        "consumer signal" in final5
+        or "90-day" in final5
+        or "dead weight" in final5
+        or "analytics" in final5
+    )
+    t5_pass = t5_check_called and t5_show_called and t5_show_target_correct
+    results_log.append({
+        "turn": 5,
+        "test": "multi_tool_composition",
+        "edp_check_called": t5_check_called,
+        "edp_show_called": t5_show_called,
+        "edp_show_target_correct": t5_show_target_correct,
+        "quoted_full_body_rationale": t5_quoted_rationale,
+        "pass": t5_pass,
+    })
+    print(
+        f"\nVERDICT: check={t5_check_called}, show={t5_show_called}, "
+        f"show_target_correct={t5_show_target_correct}, "
+        f"quoted_rationale={t5_quoted_rationale}, PASS={t5_pass}"
+    )
 
     # ── Summary ──────────────────────────────────────────────────────────────
     banner("FINAL STATE OF STORE")
