@@ -414,6 +414,90 @@ def main() -> int:
         f"quoted_rationale={t5_quoted_rationale}, PASS={t5_pass}"
     )
 
+    # ── Turn 6: SUPERSEDE — formally update an existing decision ─────────────
+    user_turn_6 = (
+        f"OK, you were right to flag {dec_xml}. After thinking about it though: "
+        "we DO need to keep XML support for one specific legacy enterprise customer "
+        "(paying account, real revenue, can't drop). Please formally supersede "
+        f"{dec_xml} with a new decision that allows XML only when the client explicitly "
+        "opts in via a `Content-Type: application/xml` request header. JSON remains "
+        "the default. Capture the rationale in the new record. Then confirm the "
+        "supersede chain to me."
+    )
+    banner("TURN 6 — SUPERSEDE TEST (formal update, not bypass)")
+    print(f"User: {user_turn_6}")
+
+    block_v6 = get_active_block(store, version=6)
+    convo = list(result5["messages"]) + [
+        SystemMessage(content=block_v6.text),
+        HumanMessage(content=user_turn_6),
+    ]
+    result6 = agent.invoke({"messages": convo}, config={"recursion_limit": 25})
+    final6 = _last_text(result6["messages"])
+    tcs6 = _collect_tool_calls(result6["messages"], start_idx=len(result5["messages"]))
+
+    trace(result6["messages"], start_idx=len(result5["messages"]), label="TURN 6 delta")
+    print("\n--- Final answer (truncated to 800 chars) ---")
+    print(final6[:800])
+
+    # Verify supersede was actually called with the correct old_id
+    supersede_calls = [(n, a) for n, a in tcs6 if n == "edp_supersede"]
+    t6_supersede_called = bool(supersede_calls)
+    t6_supersede_target_correct = any(
+        a.get("old_id") == dec_xml for _, a in supersede_calls
+    )
+    # Verify the chain in storage: dec_xml status is superseded, new active points back
+    dec_xml_after = store.show(dec_xml)
+    new_active_xml = [
+        d for d in store.list_active()
+        if d.supersedes == dec_xml
+    ]
+    t6_old_marked_superseded = dec_xml_after.status == "superseded"
+    t6_old_has_superseded_by = dec_xml_after.superseded_by is not None
+    t6_new_exists = bool(new_active_xml)
+    t6_new_supersedes_link = (
+        bool(new_active_xml) and new_active_xml[0].supersedes == dec_xml
+    )
+
+    # Verify markdown projections updated (CRIT-3 fix on supersede path)
+    md_old = store.decisions_dir / f"{dec_xml}.md"
+    md_old_status = "status: superseded" in md_old.read_text() if md_old.exists() else False
+    new_id = dec_xml_after.superseded_by or ""
+    md_new = store.decisions_dir / f"{new_id}.md" if new_id else None
+    md_new_exists = md_new.exists() if md_new else False
+
+    t6_pass = (
+        t6_supersede_called
+        and t6_supersede_target_correct
+        and t6_old_marked_superseded
+        and t6_old_has_superseded_by
+        and t6_new_exists
+        and t6_new_supersedes_link
+        and md_old_status
+        and md_new_exists
+    )
+    results_log.append({
+        "turn": 6,
+        "test": "supersede_chain",
+        "edp_supersede_called": t6_supersede_called,
+        "supersede_target_correct": t6_supersede_target_correct,
+        "old_marked_superseded": t6_old_marked_superseded,
+        "old_has_superseded_by_link": t6_old_has_superseded_by,
+        "new_record_exists": t6_new_exists,
+        "new_supersedes_link": t6_new_supersedes_link,
+        "old_markdown_updated_to_superseded": md_old_status,
+        "new_markdown_projected": md_new_exists,
+        "pass": t6_pass,
+    })
+    print(
+        f"\nVERDICT: supersede_called={t6_supersede_called}, "
+        f"target_correct={t6_supersede_target_correct}, "
+        f"old_superseded={t6_old_marked_superseded}, "
+        f"new_chain_ok={t6_new_supersedes_link}, "
+        f"old_md_updated={md_old_status}, new_md_projected={md_new_exists}, "
+        f"PASS={t6_pass}"
+    )
+
     # ── Summary ──────────────────────────────────────────────────────────────
     banner("FINAL STATE OF STORE")
     for d in store.list():
