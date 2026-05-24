@@ -1,7 +1,7 @@
 # Explicit Decision Protocol — Specification
 
-**Version:** `edp/2026-05-24` (v0.1, draft)
-**Status:** alpha, breaking changes expected before v1.0
+**Version:** `edp/2026-05-24` (v0.1)
+**Status:** v0.1 frozen. Subsequent additions are non-breaking under the same date until a breaking change requires a new version date. Breaking changes expected before v1.0.
 
 ---
 
@@ -409,15 +409,19 @@ EDP v0.1 explicitly does NOT cover:
 
 ---
 
-## 11. Open questions for v0.1
+## 11. Resolved for v0.1
 
-These are unresolved and welcome input:
+These design questions were considered during the drafting of v0.1 and resolved as follows. Each entry is binding for any implementation that claims conformance to `edp/2026-05-24`.
 
-- Should `confidence` be a freeform number, or quantised buckets (0.25 / 0.5 / 0.75 / 1.0) for better calibration discipline?
-- Should `review_due_at_step` be step-based, time-based, or both?
-- What is the right default for `provisional` decisions written by agents — auto-include in block, auto-exclude, or include with `[provisional]` marker?
-- Should adapters be required to expose `list()` and `history()`, or only the four core tools?
-- File layout: `.edp/` at project root, or `.claude/edp/` to namespace under Claude Code conventions?
+| Question | Resolution | Rationale |
+|---|---|---|
+| Should `confidence` be a freeform number, or quantised buckets? | **Freeform `[0.0, 1.0]`** | Buckets prevent calibration analysis; freeform allows downstream eval pipelines to measure calibration quality (§3.4). |
+| Should `review_due_at_step` be step-based, time-based, or both? | **Step-based only in v0.1** | Step is the unit the agent reasons about directly. Time-based review is a candidate for a future extension when needed. |
+| What is the right default for agent-authored `provisional` decisions? | **Include in active block with `[provisional]` status marker; selector MAY hide them via config** | Visible-but-distinguished is the honest default: humans can audit before promotion, agent gets feedback on its own proposals. Hiding is a per-project policy choice. |
+| Should adapters be required to expose `list()` and `history()`? | **MAY, not MUST** | The four core tools (§5.1–§5.4) are sufficient for the protocol contract. Helpers belong to implementations. |
+| File layout: `.edp/` at project root, or namespaced under harness conventions? | **`.edp/` at project root** | EDP is harness-agnostic; placing under `.claude/edp/` would imply ownership by Claude Code. Project-root keeps the store visible to all adapters equally. |
+
+Implementation-specific choices (Python SDK PyPI name, CLI surface, import name, etc.) are documented in `sdk-python/README.md` and `pyproject.toml`. They are not binding on the protocol — alternative implementations are free to make different choices.
 
 ---
 
