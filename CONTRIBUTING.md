@@ -34,6 +34,12 @@ If you want to write an adapter for a harness not listed in the roadmap:
 - Python: ruff defaults from `pyproject.toml`. Type-annotated public surface.
 - Commit messages: imperative mood, scoped prefix (`spec:`, `sdk-python:`, `adapter/claude-code:`, `docs:`).
 
+## Maintenance pace
+
+EDP is maintained by a single author on best-effort cadence. v0.1 → v1.0 is a multi-month arc, not a sprint. Issues and PRs are reviewed in batches, typically weekly. If a thread goes quiet for more than two weeks, ping with `@maintainer` — that is fair signal, not pressure.
+
+If you find EDP useful and want to share the maintenance load — protocols benefit hugely from a second voice on spec decisions — open a discussion. Co-maintainer interest is welcome and explicitly invited.
+
 ## Code of conduct
 
 Be kind, be specific, be patient. This is alpha, things will change.

@@ -100,6 +100,23 @@ EDP v0.1 deliberately renames this field to **`key_constraints`** and relaxes th
 
 Runtime invariant assertion (with a verifier gating tool calls) is a known follow-on extension. It is deferred from v0.1 because (a) gating introduces a measured verifier tax on long-horizon success (see [arXiv:2603.19328](https://arxiv.org/abs/2603.19328)) and (b) the visibility primitive — making decisions present in the agent's working context — is the load-bearing intervention that should land first.
 
+### 3.7 Decision-worthiness — what should be recorded
+
+EDP is not a logbook. Recording every micro-choice as a decision floods the active block, drowns out the signal, and trains the agent to ignore it. Recording nothing produces the silent drift EDP exists to prevent.
+
+A record SHOULD be created when at least two of the following are true:
+
+1. **Multi-turn consequence.** The choice constrains work that will happen in subsequent turns or sessions. Not a one-shot action.
+2. **Constraint-shaped.** The choice can be summarised as one or more `key_constraints` of ≤140 chars that future actions can be checked against (via `check()`).
+3. **Hard to re-derive.** The rationale depends on context that will be expensive to reconstruct later (user-stated preference, research finding, performance data).
+4. **Reversibility-relevant.** The cost of acting against this choice later is non-trivial — it requires rework, undoes user trust, or has external side effects.
+
+A record SHOULD NOT be created for: variable names, single-file refactors, ad-hoc clarifications, parameters of a single function call, or anything that would not change behaviour two turns later.
+
+When in doubt, ask: *"Will another agent / future-me, three days from now, regret not seeing this decision?"* If yes, record. If unsure, lean toward not recording — under-recording is recoverable (record it later when it becomes relevant); over-recording is corrosive (the active block becomes noise).
+
+Implementations MAY enforce a soft heuristic — e.g. warn if `key_constraints` is empty, prompt for confirmation if `decision` is shorter than 80 characters — but MUST NOT block valid records.
+
 ---
 
 ## 4. The active block (snippet injection)
@@ -109,7 +126,7 @@ The selector produces an **active block** that adapters inject into the agent's 
 ### 4.1 Block format
 
 ```
-<edp:active version="1">
+<edp:active version="7">
 DEC-0042 [active] conf=0.85 due=step:100
   Title: Focus competitive analysis on enterprise B2B (500+ emp)
   Key constraints: enterprise-only · ACV>=$50k · exclude SMB
@@ -120,12 +137,14 @@ DEC-0044 [revised] conf=0.7 → see DEC-0051
   Title: Vector store choice was Pinecone, now pgvector
 
 Active: 12 · `edp.show(id)` for full body · `edp.check(action)` before risky moves
+If multiple <edp:active> blocks appear in this context, use only version="7" — earlier blocks are stale.
 </edp:active>
 ```
 
 ### 4.2 Block constraints
 
-- Block MUST be wrapped in `<edp:active version="N">…</edp:active>` for unambiguous detection.
+- Block MUST be wrapped in `<edp:active version="N">…</edp:active>` for unambiguous detection. `version` MUST be a monotonically increasing integer per session.
+- The block MUST include the explicit precedence line at the bottom: *"If multiple `<edp:active>` blocks appear in this context, use only version=`N` — earlier blocks are stale."* This is a hard requirement, not a recommendation. Several mainstream harnesses (notably Claude Code via [`UserPromptSubmit` accumulation #40216](https://github.com/anthropics/claude-code/issues/40216)) accumulate `additionalContext` in the transcript with no API to rewrite or delete prior content. The precedence line is the only available mitigation.
 - Each snippet MUST fit in 4 lines maximum.
 - Total block target: **≤2,000 tokens**. Selector trims by `recency desc`, `confidence desc` if over budget.
 - The footer line MUST list the count and a one-line tool hint, so agents that did not read the upstream spec can still discover the tools.
@@ -303,6 +322,30 @@ A projected `decisions_current` materialised view (or a recompute on read) holds
 
 The markdown files are a **read-only projection** of the events. Editing them does not change the store. This enables git review while keeping the store authoritative.
 
+### 7.4 SQLite pragmas — required
+
+EDP stores are expected to be accessed from multiple processes simultaneously: a long-lived MCP server / middleware in the agent process, and short-lived subprocesses spawned by harness hooks (e.g. Claude Code `UserPromptSubmit` hook reading the active block on every turn). SQLite's default settings are not safe for this pattern and will surface as silent `SQLITE_BUSY` errors.
+
+Every implementation MUST apply these pragmas on every connection:
+
+```sql
+PRAGMA journal_mode = WAL;            -- allow concurrent readers + one writer
+PRAGMA busy_timeout = 5000;           -- 5s grace before SQLITE_BUSY (Python default is 0)
+PRAGMA synchronous = NORMAL;          -- full sync is overkill for append-only events
+PRAGMA wal_autocheckpoint = 1000;     -- bound WAL growth if a subprocess crashes mid-write
+PRAGMA foreign_keys = ON;             -- enforce referential integrity on supersede chains
+```
+
+Every write transaction MUST:
+
+- Be wrapped in a retry-with-backoff loop (2–3 retries, 50ms initial, exponential).
+- Complete in sub-millisecond time. Long-running aggregations belong in read connections.
+- Use `BEGIN IMMEDIATE` (not `BEGIN DEFERRED`) so contention surfaces at transaction start, not at first write.
+
+A single long-lived "checkpoint owner" (typically the MCP server / middleware) SHOULD run periodic `PRAGMA wal_checkpoint(TRUNCATE)` to bound WAL file growth even when subprocess writers do not exit cleanly.
+
+References: [SQLite concurrent writes and busy errors](https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/), [Abusing SQLite to handle concurrency](https://blog.skypilot.co/abusing-sqlite-to-handle-concurrency/).
+
 ---
 
 ## 8. Adapter contract
@@ -314,13 +357,28 @@ An EDP adapter is responsible for delivering the active block to a specific harn
 - Read the active block from a configured EDP store on each invocation.
 - Place the block in a location where the LLM will see it on every turn (system prompt prefix, user-turn prefix, or harness-specific equivalent).
 - Surface the four core tools to the agent, in whatever native tool-format the harness uses.
+- Emit blocks with a monotonically increasing `version="N"` per session, and include the precedence line required by §4.2 in every emitted block.
+- Apply the SQLite pragmas required by §7.4 on every connection opened against the store.
 
-### 8.2 Adapter SHOULD
+### 8.2 Harness-specific MUSTs
 
-- Place the block at a stable position so prompt caching is preserved.
-- Detect the duplicate-injection / accumulation bug present in some harnesses (e.g. Claude Code `UserPromptSubmit`) and either emit a delta or include the `version="N"` marker so the model uses only the latest block.
+These are non-negotiable for the named adapter implementations because of documented harness behaviour. Other adapter implementations SHOULD apply the spirit of these rules.
 
-### 8.3 Known adapters (v0.1 roadmap)
+**Claude Code adapter** MUST ship in **two forms**:
+- A standalone `.claude/hooks/` config that the user can drop into a project (works today).
+- A plugin manifest form (works once [claude-code#16538](https://github.com/anthropics/claude-code/issues/16538) is fixed — currently `hookSpecificOutput.additionalContext` is silently dropped for hooks delivered via plugin manifest).
+
+Until #16538 is resolved, the standalone form is the supported default; the plugin form is shipped opportunistically as a convenience for teams using marketplace distribution.
+
+**LangGraph adapter** MUST execute its `@before_model` middleware **before** LangChain's built-in `SummarizationMiddleware`. Both middlewares write to `state["messages"]` at the same insertion point; if summarization runs first, the EDP block can be summarised away before the model sees it. The adapter package MUST ship an integration test asserting correct ordering when both middlewares are registered simultaneously. See LangChain v1.1 middleware [changelog](https://changelog.langchain.com/announcements/langchain-1-1) for context.
+
+### 8.3 Adapter SHOULD
+
+- Place the block at a stable position (top of system prompt, ideally) so prompt caching is preserved across turns.
+- Pin to stdio transport on Windows until [fastmcp#4192](https://github.com/jlowin/fastmcp/issues/4192) is resolved (HTTP transport leaks SSE tasks per session, deadlocks after ~12 sessions on Windows).
+- Where the harness exposes a "subtask boundary" signal, implement §6.1 (subtask boundary review).
+
+### 8.4 Known adapters (v0.1 roadmap)
 
 - `adapters/claude-code-plugin/` — `UserPromptSubmit` + `SessionStart` hooks, four tools as plugin commands
 - `adapters/mcp-server/` — FastMCP 3.x server, four tools, resource `decisions://active` for MCP clients that auto-fetch resources
@@ -380,13 +438,17 @@ EDP exists because the following practices all silently fail. Avoid them in any 
 
 ## 13. Reference implementations
 
-| Component | Language | Status |
-|---|---|---|
-| Core SDK | Python (FastMCP 3.x) | scaffolding |
-| MCP-server adapter | Python (thin wrapper over core) | planned |
-| Claude Code plugin | TypeScript (Claude Agent SDK) | planned |
+| Component | Language | Status | Known limitations |
+|---|---|---|---|
+| Core SDK | Python (FastMCP 3.x) | scaffolding | Multi-process write contention — see §7.4; pin to stdio on Windows ([fastmcp#4192](https://github.com/jlowin/fastmcp/issues/4192)) |
+| MCP-server adapter | Python (thin wrapper over core) | planned | Resources are pull-only in every mainstream MCP client; per-turn auto-injection requires a harness-native adapter, not MCP alone |
+| Claude Code adapter | Hooks (standalone) + Plugin manifest (when available) | planned | Plugin-form `SessionStart` `additionalContext` silently dropped ([claude-code#16538](https://github.com/anthropics/claude-code/issues/16538)); use standalone `.claude/hooks/` form until fixed |
+| LangGraph adapter | Python (`@before_model` middleware) | planned | Must run before `SummarizationMiddleware` — see §8.2; requires LangChain ≥ 1.1 |
+| Vercel AI SDK adapter | TypeScript (`wrapLanguageModel` middleware) | planned | Structured-output schema validation gap ([vercel/ai#9594](https://github.com/vercel/ai/issues/9594)) — own validator required |
+| Cursor watcher | Python (daemon regenerates `.cursor/rules/edp-active.mdc`) | post-v0.1 | Rules are static — refresh latency on the order of file-watcher poll interval |
+| LiteLLM proxy adapter | Python (`async_pre_call_hook`) | post-v0.1 | Catch-all for any direct API call; provider-specific system-prompt semantics differ |
 
-See `sdk-python/` and `adapters/` for current state.
+See `sdk-python/` and `adapters/` for current state. The public issue [#1 in the project repo](https://github.com/Isk4R1oT/edp/issues/1) tracks the live status of these limitations.
 
 ---
 
