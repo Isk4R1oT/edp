@@ -122,22 +122,44 @@ The first reference implementation is a Python SDK on FastMCP 3.x. The first ada
 
 ---
 
+## Quick install
+
+```sh
+# Reference Python SDK + LangGraph binding
+pip install "explicit-decision-protocol[langgraph]"
+
+# In any project:
+cd your-project
+edp init
+edp record --title "your first decision" --decision "..." --constraint "..." --evidence "@..."
+edp inject --version 1       # prints the <edp:active> block agents will see
+edp-mcp-server               # start the MCP server (stdio) for Cursor/Cline/Continue/CC
+```
+
+For Claude Code installation, see [`adapters/claude-code-plugin/README.md`](adapters/claude-code-plugin/README.md).
+For MCP-client installation (Cursor/Cline/Continue/Claude Desktop), see [`adapters/mcp-server/README.md`](adapters/mcp-server/README.md).
+For LangGraph / LangChain v1.1+ agents, see [`adapters/middleware-langgraph/README.md`](adapters/middleware-langgraph/README.md).
+
 ## Repo layout
 
 ```
 edp/
-├── SPEC.md                        # the specification
-├── README.md                      # this file
-├── EXAMPLE.md                     # walkthrough of an agent session using EDP
+├── SPEC.md                              # the specification (v0.1 frozen, tag v0.1.0-spec)
+├── README.md                            # this file
+├── EXAMPLE.md                           # walkthrough of an agent session using EDP
 ├── CHANGELOG.md
 ├── CONTRIBUTING.md
-├── docs/evidence.md               # full citation arsenal for the problem statement
-├── spec/v0.1/                     # versioned spec artifacts (schema.json)
-├── sdk-python/                    # reference Python SDK (FastMCP 3.x)
+├── docs/evidence.md                     # full citation arsenal for the problem statement
+├── spec/v0.1/                           # versioned spec artifacts (schema.json)
+├── sdk-python/                          # reference Python SDK on FastMCP 3.x
+│   ├── edp/                             # core: models, store, selector, render, server, cli, bindings
+│   └── tests/                           # 37 unit tests (~0.15s)
 ├── adapters/
-│   ├── claude-code-plugin/        # UserPromptSubmit + SessionStart hooks
-│   └── mcp-server/                # FastMCP server wrapping the core SDK
-└── examples/sample-project/       # an .edp/ store with two sample decisions
+│   ├── claude-code-plugin/              # SessionStart + UserPromptSubmit hooks + slash commands
+│   ├── mcp-server/                      # install-matrix for Claude Desktop / CC / Cursor / Cline / Continue + smoke.py
+│   └── middleware-langgraph/            # LangGraph adapter: two injection modes + 2 runnable examples
+├── examples/sample-project/             # an .edp/ store with two sample decisions
+└── tests/integration/                   # 6-turn integration on real LLM via OpenRouter
 ```
 
 ---
@@ -145,14 +167,18 @@ edp/
 ## Status & roadmap
 
 - [x] v0.1 specification draft (`SPEC.md`)
+- [x] Spec v0.1 frozen (tag `v0.1.0-spec`)
 - [x] Evidence pass (`docs/evidence.md`)
 - [x] Sample project layout (`examples/sample-project/`)
-- [ ] Python SDK implementation (`sdk-python/`)
-- [ ] Claude Code plugin (`adapters/claude-code-plugin/`)
-- [ ] MCP server adapter (`adapters/mcp-server/`)
-- [ ] Cursor watcher (post-v0.1)
-- [ ] LangGraph + Vercel AI SDK middleware (post-v0.1)
-- [ ] LiteLLM proxy adapter (post-v0.1)
+- [x] Python SDK implementation (`sdk-python/`) — 37 unit tests, 6/6 integration on real LLM (gpt-4.1-mini)
+- [x] Claude Code adapter (standalone hooks form) — `adapters/claude-code-plugin/` · 7 hook tests + end-to-end smoke verified in live `claude` session
+- [x] MCP server adapter — `adapters/mcp-server/` · install matrix for Claude Desktop / CC / Cursor / Cline / Continue · 5/5 protocol probes pass via `smoke.py`
+- [x] LangGraph adapter — `adapters/middleware-langgraph/` · two injection modes (helper + middleware) · 2 runnable examples
+- [ ] Claude Code plugin-manifest form (waiting on [claude-code#16538](https://github.com/anthropics/claude-code/issues/16538) upstream fix)
+- [ ] Cursor watcher (`.cursor/rules/edp-active.mdc` daemon — post-Sprint-3a)
+- [ ] Vercel AI SDK middleware (TS — post-Sprint-3a)
+- [ ] LiteLLM proxy adapter (post-Sprint-3a, catch-all for any provider)
+- [ ] Twin-study eval (paired k=4 × 20-30 tasks per SPEC §11 Sprint 7 plan)
 - [ ] v1.0 — wire protocol for remote stores, capability handshake, AgentCard-style discovery
 
 ---
