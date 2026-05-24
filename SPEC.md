@@ -47,11 +47,11 @@ A decision is a single immutable record with these fields.
 | Field | Type | Description |
 |---|---|---|
 | `tags` | array of string | Free-form categories used by the selector to scope active blocks |
-| `confidence` | number, 0.0–1.0 | Calibrated confidence in the decision at write time |
+| `confidence` | number, 0.0–1.0 | Calibrated confidence at write time. See §3.4 |
 | `supersedes` | string, `DEC-NNNN` or null | Previous decision this one replaces |
 | `superseded_by` | string, `DEC-NNNN` or null | Set on the previous record when this one supersedes it |
-| `review_due_at_step` | integer or null | Step at which this decision should be re-confirmed |
-| `key_constraints` | array of string, each ≤140 chars | Human-readable constraints surfaced in the snippet block. **Not assertable in v0.1** — this is a contract for the agent reader, not a runtime predicate |
+| `review_due_at_step` | integer or null | Step at which this decision should be re-confirmed. See §3.5 |
+| `key_constraints` | array of string, each ≤140 chars | Human-readable constraints surfaced in the snippet block. See §3.6 |
 | `context` | string (markdown) | What facts and state led to the decision |
 | `alternatives` | array of objects `{label, rejected_because}` | What was considered and rejected |
 | `consequences` | array of string | What this decision enables / closes / risks |
@@ -68,6 +68,37 @@ rejected (was proposed, never activated)
 ```
 
 `active` records participate in the active block. All other statuses are read-only history.
+
+### 3.4 Confidence — calibration discipline
+
+`confidence` is a number on `[0.0, 1.0]`, not a category. Categories (`high`/`medium`/`low`) are explicitly forbidden because they prevent calibration analysis.
+
+Implementations and operators SHOULD treat these patterns as red flags:
+
+- An agent that writes `confidence = 1.0` (or any single fixed value) on every record. This is a signal the agent is not calibrating. Catch it in an eval pipeline that checks confidence distribution across a window of decisions.
+- An agent whose confidence does not correlate with downstream success on the same class of decisions. Confidence is supposed to predict reliability, not perform it.
+
+Implementations MAY auto-decay confidence: when `review_due_at_step` is reached and the decision has not been re-confirmed, decrement `confidence` by `0.1` and append a note to `review_history`. This is RECOMMENDED but not required for v0.1.
+
+### 3.5 `review_due_at_step` — non-binding default rule
+
+`review_due_at_step` is optional, but SHOULD be set for any decision that is not strictly tactical. Decisions without a review trigger silently accumulate stale evidence on long sessions.
+
+A sensible default for implementations to suggest at write time:
+
+- `created_at_step + 100` for business or scope decisions
+- `created_at_step + 50` for technical / architectural decisions
+- `created_at_step + 20` for tactical decisions
+
+These are heuristics, not normative. Operators MAY tune per project.
+
+### 3.6 `key_constraints` — naming and scope note
+
+In Architecture Decision Record literature (Nygard 2011, MADR) this field is conventionally called **`invariants`** and is required to be programmatically assertable — a runtime predicate.
+
+EDP v0.1 deliberately renames this field to **`key_constraints`** and relaxes the requirement: these are human-readable constraints displayed to the agent in the snippet block, **not** runtime predicates. The agent reads them, the agent may call `check()` to consult them before risky actions, but no proxy or verifier enforces them on tool calls.
+
+Runtime invariant assertion (with a verifier gating tool calls) is a known follow-on extension. It is deferred from v0.1 because (a) gating introduces a measured verifier tax on long-horizon success (see [arXiv:2603.19328](https://arxiv.org/abs/2603.19328)) and (b) the visibility primitive — making decisions present in the agent's working context — is the load-bearing intervention that should land first.
 
 ---
 
@@ -111,6 +142,8 @@ Default selection policy (implementations MAY override):
 2. Include `revised` and `superseded` decisions only if referenced by an included `active` decision (so the agent sees the supersede pointer).
 3. Order: pinned (if any) > by recency desc > by confidence desc.
 4. Trim from the bottom if the block exceeds token budget. The footer reports the trimmed count.
+
+When trimming, the selector MUST preserve `id`, `status`, and `key_constraints` for every included decision. `title` is the second-priority field. `confidence` and `due` markers are dropped first if a single record must be shortened. Whole records are dropped before any record is shown without its `key_constraints`.
 
 Selectors MUST NOT use semantic / embedding search in v0.1. Tag + recency + status + FTS (on-demand only via the search tool) is sufficient and predictable. Latency target: <5ms for projects up to 10,000 decisions.
 
@@ -213,6 +246,26 @@ agent (later)
 
 The agent never directly accesses storage. All access goes through the four tools. Adapters are responsible for the inject side of the loop.
 
+### 6.1 Subtask boundary review
+
+At every subtask boundary (or, in harnesses without first-class subtasks, at a configurable step interval), the adapter SHOULD:
+
+1. Query `due(current_step)` to get decisions whose `review_due_at_step` ≤ current step.
+2. Surface them to the agent with a structured "please re-confirm or supersede these" prompt.
+3. For decisions that are neither re-confirmed nor superseded within a configurable grace window, decrement `confidence` by `0.1` and append a `review_history` entry noting the decay.
+
+This closes the "stale active decisions" failure mode where long sessions accumulate decisions whose original context has shifted entirely.
+
+### 6.2 Context compaction
+
+When the harness compacts context (e.g. Claude Code auto-compaction at the context window boundary), adapters MUST ensure:
+
+1. The full active block survives compaction. Compaction MUST NOT silently drop the `<edp:active>` block — this is the single most-cited cause of constraint loss in production (see [claude-code#19471](https://github.com/anthropics/claude-code/issues/19471)).
+2. `key_constraints` of every active decision land in the anchor preamble of the post-compaction context (i.e. at the top, where attention is densest).
+3. `superseded` and `deprecated` records do NOT need to survive compaction — they live in the durable store and can be retrieved on demand via `show(id)`.
+
+Adapters that cannot inspect the compaction event SHOULD re-inject the active block on the first turn after compaction is detected (by a context-size drop or harness signal).
+
 ---
 
 ## 7. Storage contract
@@ -310,7 +363,22 @@ These are unresolved and welcome input:
 
 ---
 
-## 12. Reference implementations
+## 12. Anti-patterns (what tends to go wrong)
+
+EDP exists because the following practices all silently fail. Avoid them in any EDP-conformant implementation or agent integration.
+
+1. **One large `Decisions.md` for everything.** Does not retrieve well, hides the supersede graph, and tempts in-place edits. EDP requires one record per decision, append-only.
+2. **Decisions without `key_constraints`.** A decision body in prose tonces in attention dilution within tens of turns. The snippet block surfaces `key_constraints` precisely to keep the operative content visible after the prose has been compacted away.
+3. **Free-form `key_constraints` ("important to consider enterprise").** If the constraint cannot be summarised in ≤140 chars in a form an agent can match against an action, it is an intention, not a constraint. Move it to `consequences`.
+4. **Editing an `active` decision.** Breaks the audit trail. Always supersede, even for small wording changes.
+5. **`confidence = 1.0` on every record.** Calibration failure. Catch in an eval pipeline that checks the confidence distribution across a recent window.
+6. **`evidence = "from earlier in the conversation"`.** Useless on the second session. Only stable handles (`@session_log/...`, `@artifacts/path:line`, `@memory/...`) — anything else is reconstructable hallucination.
+7. **No `review_due_at_step`.** Decisions silently rot. Always set one, even if the default heuristic is wrong by 30%.
+8. **Skipping `alternatives`.** Tens of turns later the agent re-derives a rejected alternative because the rejection rationale is not in context. Always record what was considered and why it lost.
+9. **Treating the snippet block as a system reminder the model "should" follow.** Treat it as **shown context** that the agent reads and may act on; use `check()` for any risky action regardless. Hope is not a strategy.
+10. **Adding fields ad hoc to the JSON record.** Extensions must go through the spec process (open an issue, motivate the field, propose the schema change). Otherwise the protocol fragments and adapters break.
+
+## 13. Reference implementations
 
 | Component | Language | Status |
 |---|---|---|
@@ -319,6 +387,22 @@ These are unresolved and welcome input:
 | Claude Code plugin | TypeScript (Claude Agent SDK) | planned |
 
 See `sdk-python/` and `adapters/` for current state.
+
+---
+
+## 14. References
+
+The EDP record schema and supersede semantics derive from established Architecture Decision Record practice, extended with primitives needed for an agent-readable lifecycle.
+
+- Nygard, M. *Documenting Architecture Decisions* (2011) — the original ADR
+- [MADR](https://adr.github.io/madr/) — Markdown ADR template
+- Microsoft Azure Well-Architected Framework — ADR section
+- Anthropic Engineering, *Effective context engineering for AI agents* — [link](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents)
+- Anthropic Engineering, *Effective harnesses for long-running agents* — [link](https://www.anthropic.com/engineering/effective-harnesses-for-long-running-agents)
+- MCP — [Model Context Protocol](https://modelcontextprotocol.io/) — version policy, JSON-RPC tool surface
+- A2A — [Agent-to-Agent Protocol](https://a2a-protocol.org/) — AgentCard discovery pattern (deferred to v1.0)
+
+See [`docs/evidence.md`](docs/evidence.md) for the full citation arsenal motivating the design (22 sources across academic findings, GitHub issues, HN signal, and SWE-bench analysis).
 
 ---
 
