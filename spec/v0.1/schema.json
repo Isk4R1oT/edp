@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://edp.dev/spec/v0.1/schema.json",
+  "title": "EDP Decision Record",
+  "description": "A single decision record per the Explicit Decision Protocol specification edp/2026-05-24",
+  "type": "object",
+  "required": [
+    "id",
+    "title",
+    "status",
+    "created_at_step",
+    "created_at_ts",
+    "created_by",
+    "decision",
+    "evidence"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^DEC-[0-9]{4,}$",
+      "description": "Sequential identifier, project-unique, never reused"
+    },
+    "title": {
+      "type": "string",
+      "maxLength": 120,
+      "description": "One-line imperative statement of what is decided"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "proposed",
+        "active",
+        "superseded",
+        "revised",
+        "deprecated",
+        "rejected"
+      ]
+    },
+    "created_at_step": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "created_at_ts": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "created_by": {
+      "type": "string",
+      "description": "Actor identifier, e.g. orchestrator, subagent_research, human:igor"
+    },
+    "decision": {
+      "type": "string",
+      "description": "The actual decision statement in markdown. One decision per record."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "description": "Stable index handle, e.g. @session_log/step_8/user_message"
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "supersedes": {
+      "type": ["string", "null"],
+      "pattern": "^DEC-[0-9]{4,}$"
+    },
+    "superseded_by": {
+      "type": ["string", "null"],
+      "pattern": "^DEC-[0-9]{4,}$"
+    },
+    "review_due_at_step": {
+      "type": ["integer", "null"],
+      "minimum": 0
+    },
+    "key_constraints": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 140
+      },
+      "description": "Human-readable constraints surfaced in the snippet block. Not assertable in v0.1."
+    },
+    "context": {
+      "type": "string",
+      "description": "What facts and state led to the decision (markdown)"
+    },
+    "alternatives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["label", "rejected_because"],
+        "properties": {
+          "label": { "type": "string" },
+          "rejected_because": { "type": "string" }
+        }
+      }
+    },
+    "consequences": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "review_history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["ts", "step", "note"],
+        "properties": {
+          "ts": { "type": "string", "format": "date-time" },
+          "step": { "type": "integer" },
+          "note": { "type": "string" },
+          "ref": { "type": "string" }
+        }
+      }
+    },
+    "provisional": {
+      "type": "boolean",
+      "description": "Set to true for agent-authored decisions awaiting human confirmation. Excluded from active block by default selector when true."
+    }
+  }
+}

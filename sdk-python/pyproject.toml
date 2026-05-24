@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "explicit-decision-protocol"
+version = "0.1.0a0"
+description = "Reference Python SDK for the Explicit Decision Protocol (EDP)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Igor Larrat" }]
+keywords = ["llm", "agents", "mcp", "decisions", "adr", "claude-code"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+  "fastmcp>=3.0",
+  "pydantic>=2.0",
+  "typer>=0.12",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio",
+  "ruff",
+  "mypy",
+]
+
+[project.scripts]
+edp = "edp.cli:app"
+
+[project.urls]
+Homepage = "https://github.com/Isk4R1oT/edp"
+Specification = "https://github.com/Isk4R1oT/edp/blob/main/SPEC.md"
+Issues = "https://github.com/Isk4R1oT/edp/issues"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

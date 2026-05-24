@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# EDP local stores (default location)
+.edp/store.db
+.edp/store.db-shm
+.edp/store.db-wal
+
+# Misc
+.env
+.env.local
+*.log
+
+# Local development workspace — author-private, do NOT commit
+.claude/
+CLAUDE.md
+.cursor/
+.cursorrules
+.planning/
+.notes/
+.drafts/
+.scratch/
+PLAN.md
+PLANS.md
+IMPLEMENTATION.md
+IMPLEMENTATION_PLAN.md
+ROADMAP_PRIVATE.md
+NOTES.md
+DRAFT.md
+WIP.md
+*.local.md

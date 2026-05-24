@@ -1,0 +1,11 @@
+{
+  "spec_version": "edp/2026-05-24",
+  "selector": {
+    "token_budget": 2000,
+    "include_revised_superseded_if_referenced": true,
+    "ordering": ["pinned", "recency_desc", "confidence_desc"]
+  },
+  "tags": {
+    "known": ["orm", "database", "async", "api", "serialisation", "infra", "storage", "pagination"]
+  }
+}
