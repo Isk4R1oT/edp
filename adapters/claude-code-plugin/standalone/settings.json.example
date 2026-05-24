@@ -1,0 +1,27 @@
+{
+  "_comment": "Copy this file into your project as .claude/settings.json (or merge with an existing one). Adjust the absolute path to edp_hook.py so it points at your local checkout.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ABSOLUTE/PATH/TO/edp/adapters/claude-code-plugin/standalone/hooks/edp_hook.py SessionStart"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ABSOLUTE/PATH/TO/edp/adapters/claude-code-plugin/standalone/hooks/edp_hook.py UserPromptSubmit"
+          }
+        ]
+      }
+    ]
+  }
+}

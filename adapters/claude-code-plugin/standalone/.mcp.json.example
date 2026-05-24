@@ -1,0 +1,12 @@
+{
+  "_comment": "Copy this file into your project as .claude/.mcp.json (or merge with an existing one). Registers the EDP MCP server so Claude Code can call edp_show / edp_check / edp_record / edp_supersede directly as tools. Adjust EDP_STORE to the absolute path of your .edp/ directory if it is not at the project root.",
+  "mcpServers": {
+    "edp": {
+      "command": "edp-mcp-server",
+      "args": [],
+      "env": {
+        "EDP_STORE": "${PWD}/.edp"
+      }
+    }
+  }
+}
