@@ -33,9 +33,20 @@ dev = [
   "ruff",
   "mypy",
 ]
+langgraph = [
+  "langchain>=1.0",
+  "langgraph>=0.2",
+]
+pydantic-ai = [
+  "pydantic-ai>=0.0.13",
+]
 
 [project.scripts]
 edp = "edp.cli:app"
+edp-mcp-server = "edp.server:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["edp"]
 
 [project.urls]
 Homepage = "https://github.com/Isk4R1oT/edp"
