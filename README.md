@@ -180,20 +180,50 @@ The first reference implementation is a Python SDK on FastMCP 3.x. The first ada
 ## Quick install
 
 ```sh
-# Reference Python SDK + LangGraph binding
-pip install "explicit-decision-protocol[langgraph]"
+# Core SDK + CLI + MCP server
+pip install explicit-decision-protocol
 
-# In any project:
-cd your-project
-edp init
-edp record --title "your first decision" --decision "..." --constraint "..." --evidence "@..."
-edp inject --version 1       # prints the <edp:active> block agents will see
-edp-mcp-server               # start the MCP server (stdio) for Cursor/Cline/Continue/CC
+# + LangGraph binding (langchain >= 1.1)
+pip install "explicit-decision-protocol[langgraph]"
 ```
 
-For Claude Code installation, see [`adapters/claude-code-plugin/README.md`](adapters/claude-code-plugin/README.md).
-For MCP-client installation (Cursor/Cline/Continue/Claude Desktop), see [`adapters/mcp-server/README.md`](adapters/mcp-server/README.md).
-For LangGraph / LangChain v1.1+ agents, see [`adapters/middleware-langgraph/README.md`](adapters/middleware-langgraph/README.md).
+This puts two console scripts on `PATH`: `edp` (CLI) and `edp-mcp-server` (MCP stdio server for any MCP client).
+
+```sh
+cd your-project
+edp init                                                # creates .edp/
+edp record --title "first decision" --decision "..."    # commit your first one
+edp list --active
+edp inject --version 1                                  # prints the <edp:active> block
+```
+
+### Claude Code in 60 seconds
+
+The adapter files are not on PyPI yet (Sprint 2 ships them as a `.claude/` config drop-in; plugin-manifest form blocked on [claude-code#16538](https://github.com/anthropics/claude-code/issues/16538)). Clone the repo, drop the four files in:
+
+```sh
+git clone https://github.com/Isk4R1oT/edp.git ~/edp
+
+cd your-project
+edp init                                                # create .edp/ if you haven't
+
+mkdir -p .claude/commands
+cp ~/edp/adapters/claude-code-plugin/standalone/settings.json.example .claude/settings.json
+cp ~/edp/adapters/claude-code-plugin/standalone/.mcp.json.example .claude/.mcp.json
+cp ~/edp/adapters/claude-code-plugin/standalone/commands/*.md .claude/commands/
+
+# Edit .claude/settings.json — replace ABSOLUTE/PATH/TO/edp/... with $HOME/edp/...
+
+claude                                                  # session starts
+```
+
+On `SessionStart` the agent sees the protocol primer + the active block. On every `UserPromptSubmit` it sees the active block again (without the primer). The four EDP tools (`edp_record`, `edp_show`, `edp_check`, `edp_supersede`) are auto-registered via the bundled MCP server. Six slash commands (`/edp-record`, `/edp-show`, `/edp-check`, `/edp-supersede`, `/edp-list`, `/edp-events`) give you a manual escape hatch.
+
+### Other harnesses
+
+- **Cursor / Cline / Continue / Claude Desktop** — `edp-mcp-server` is a stdio MCP server. Install matrix in [`adapters/mcp-server/README.md`](adapters/mcp-server/README.md).
+- **LangGraph / LangChain v1.1+** — `from edp.bindings.langgraph import edp_tools, edp_before_model`. Two runnable examples in [`adapters/middleware-langgraph/`](adapters/middleware-langgraph/).
+- **Other MCP clients** — stdio JSON-RPC per spec 2025-06-18; should work with any compliant client.
 
 ## Repo layout
 

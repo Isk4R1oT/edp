@@ -8,6 +8,9 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 
 ## [Unreleased]
 
+(Documentation polish and the first PyPI publish — see v0.1.2 below for
+the SDK feature state at that point.)
+
 ### Added
 
 - `docs/dogfood-tinycache.md` — public sanitized trace of a two-session
@@ -16,18 +19,26 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 - `README.md` — new "Does it actually work?" section between the snippet
   block and "Why a protocol, not a library". Distinguishes first-party
   dogfood findings from third-party citations.
+- `README.md` — "Claude Code in 60 seconds" subsection in Quick install
+  with real, copy-pasteable setup commands.
 - `docs/evidence.md` — new §5 "Own dogfood findings" with three buckets
   (blank-slate trial, naturalistic test, explicit integration test) and
   an explicit list of what has NOT yet been measured.
 - `EXAMPLE.md` — now a walkthrough of the real tinycache dogfood trial
   (decision bodies verbatim from the store; snippet blocks rendered
   illustratively) rather than a synthetic enterprise example.
+- `sdk-python/README.md` — completely rewritten (was stale "scaffolding"
+  placeholder); now reflects the implemented SDK and becomes the PyPI
+  package description.
 
 ### Changed
 
 - `README.md` Status & roadmap — refreshed test counts (48 unit tests,
   9 hook tests including primer auto-inject) and added v0.1.1 / v0.1.2
   milestones as completed.
+- `sdk-python/pyproject.toml` version bumped `0.1.0a0 → 0.1.2` so the
+  PyPI release reflects the actual SDK state (revision_conditions field
+  + primer + LangChain 1.1 middleware fix all shipped).
 
 ## [0.1.2] — 2026-05-25
 
