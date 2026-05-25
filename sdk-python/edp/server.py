@@ -94,6 +94,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
         provisional: bool = False,
+        step: Optional[int] = None,
     ) -> str:
         """Record a new EDP decision; returns the assigned DEC-NNNN id.
 
@@ -122,6 +123,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
                 confidence=0.85,
             )  →  "DEC-0051"
         """
+        version_state["n"] += 1
         return store.record(
             title=title,
             decision=decision,
@@ -131,6 +133,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             confidence=confidence,
             tags=tags or [],
             actor="agent",
+            step=step if step is not None else version_state["n"],
             review_due_at_step=review_due_at_step,
             provisional=provisional,
         )
@@ -145,6 +148,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         confidence: float = 0.7,
         revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
+        step: Optional[int] = None,
     ) -> str:
         """Replace an existing EDP decision with a new one; archives the old, preserves the chain.
 
@@ -165,6 +169,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
                 confidence=0.85,
             )  →  "DEC-0053"
         """
+        version_state["n"] += 1
         return store.supersede(
             old_id,
             title=title,
@@ -174,6 +179,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             evidence=evidence,
             confidence=confidence,
             review_due_at_step=review_due_at_step,
+            step=step if step is not None else version_state["n"],
             actor="agent",
         )
 
