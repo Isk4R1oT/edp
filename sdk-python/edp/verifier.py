@@ -52,7 +52,6 @@ Truncation is announced in the prompt so the model sees what was elided.
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -220,80 +219,97 @@ def _parse_verifier_json(text: str) -> CompatibilityReport:
         )
 
 
-async def _verify_async(
+def _build_user_message(
     planned_action: str,
     active_decisions: list[Decision],
-    *,
-    model: str,
-    timeout_s: float,
-) -> CompatibilityReport:
-    """Async implementation. Uses claude_agent_sdk.query() — same auth path as
-    the main Claude Code agent (subscription OR ANTHROPIC_API_KEY).
-    """
-    try:
-        from claude_agent_sdk import (  # type: ignore[import-not-found]
-            AssistantMessage,
-            ClaudeAgentOptions,
-            ResultMessage,
-            TextBlock,
-            query,
-        )
-    except ImportError as e:
-        raise VerifierUnavailable(
-            "claude_agent_sdk not installed. Install with: "
-            "pip install 'explicit-decision-protocol[verifier]'"
-        ) from e
-
-    options = ClaudeAgentOptions(
-        model=model,
-        system_prompt=SYSTEM_PROMPT,
-        allowed_tools=[],          # no tools — text response only
-        mcp_servers={},            # no MCP — pure inference call
-        strict_mcp_config=True,
-        setting_sources=[],        # isolated from project hooks; verifier is a clean call
-        max_turns=1,               # one model turn, no agentic loop
-        permission_mode="bypassPermissions",
-        include_partial_messages=False,
-        include_hook_events=False,
-    )
-
-    user_message = (
+) -> str:
+    return (
         "PLANNED ACTION:\n"
         + _wrap_planned_action(planned_action)
         + "\n\nACTIVE DECISIONS (invariants you must enforce):\n"
         + _format_decisions_for_verifier(active_decisions)
-        + '\n\nRespond now with the single-line JSON object per the output protocol.'
+        + "\n\nRespond now with the single-line JSON object per the output protocol."
     )
 
-    response_text_parts: list[str] = []
 
-    async def _drive() -> None:
-        async for msg in query(prompt=user_message, options=options):
-            if isinstance(msg, AssistantMessage):
-                for block in msg.content:
-                    if isinstance(block, TextBlock):
-                        response_text_parts.append(block.text)
-            elif isinstance(msg, ResultMessage):
-                if msg.subtype not in ("success",):
-                    raise VerifierTransientError(
-                        f"verifier query finished with subtype={msg.subtype!r}"
-                    )
-                return
+def _run_verifier_via_cli(
+    user_message: str,
+    *,
+    model: str,
+    timeout_s: float,
+) -> str:
+    """Run the verifier inference by invoking the `claude` CLI directly.
+
+    We do NOT use claude_agent_sdk.query() here — the verifier hook itself
+    runs inside a subprocess spawned by claude_agent_sdk's CLI, and nesting
+    a second claude_agent_sdk session reliably deadlocks the inner async
+    generator (manifests as `RuntimeError: aclose(): asynchronous generator
+    is already running` plus a 15s hang on every PreToolUse trigger). The
+    direct CLI path avoids the nested asyncio + nested SDK session entirely.
+
+    Auth still flows through `claude` CLI — same subscription / API-key
+    inheritance as the main agent. No ANTHROPIC_API_KEY required when the
+    user is logged into Claude Code.
+    """
+    import shutil
+    import subprocess
+
+    claude_bin = shutil.which("claude")
+    if not claude_bin:
+        raise VerifierUnavailable(
+            "`claude` CLI not on PATH. The verifier authenticates through it."
+        )
+
+    cmd = [
+        claude_bin,
+        "-p", user_message,
+        "--model", model,
+        "--system-prompt", SYSTEM_PROMPT,
+        "--allowed-tools", "",
+        "--output-format", "json",
+        "--max-turns", "1",
+        "--permission-mode", "bypassPermissions",
+    ]
 
     try:
-        await asyncio.wait_for(_drive(), timeout=timeout_s)
-    except asyncio.TimeoutError as e:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=timeout_s,
+        )
+    except subprocess.TimeoutExpired as e:
         raise VerifierTransientError(
-            f"verifier timed out after {timeout_s}s"
+            f"verifier `claude` CLI timed out after {timeout_s}s"
         ) from e
-    except VerifierUnavailable:
-        raise
-    except Exception as e:  # noqa: BLE001
+    except OSError as e:
         raise VerifierTransientError(
-            f"verifier query failed ({type(e).__name__}): {e}"
+            f"verifier `claude` CLI subprocess failed: {e}"
         ) from e
 
-    return _parse_verifier_json("".join(response_text_parts))
+    if result.returncode != 0:
+        raise VerifierTransientError(
+            f"verifier `claude` CLI exited {result.returncode}: "
+            f"stderr={result.stderr[:200]!r} stdout={result.stdout[:200]!r}"
+        )
+
+    # `--output-format json` wraps the response in an envelope. The actual
+    # model text is typically at envelope["result"]. Defensive fallback to
+    # other common keys; final fallback to raw stdout. NOTE: this defensive
+    # parsing is a known costyl (task #123) — lock to a single key after
+    # confirming with current Claude CLI docs.
+    raw = result.stdout.strip()
+    if not raw:
+        return ""
+    try:
+        envelope = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    if isinstance(envelope, dict):
+        for key in ("result", "text", "content", "message"):
+            if key in envelope and isinstance(envelope[key], str):
+                return envelope[key]
+    return raw
 
 
 def verify(
@@ -337,11 +353,10 @@ def verify(
             "EDP_VERIFIER_DISABLE=1 set in environment — verifier off by operator policy."
         )
     model_id = model or os.environ.get("EDP_VERIFIER_MODEL") or DEFAULT_MODEL
-    return asyncio.run(
-        _verify_async(
-            planned_action,
-            active_decisions,
-            model=model_id,
-            timeout_s=timeout_s,
-        )
+    user_message = _build_user_message(planned_action, active_decisions)
+    raw_text = _run_verifier_via_cli(
+        user_message,
+        model=model_id,
+        timeout_s=timeout_s,
     )
+    return _parse_verifier_json(raw_text)

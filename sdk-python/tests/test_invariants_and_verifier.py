@@ -437,20 +437,17 @@ def test_verifier_wraps_invariants_in_untrusted_tags(tmp_store):
     assert "ignore previous instructions" in text
 
 
-def test_verifier_raises_unavailable_when_sdk_missing(monkeypatch):
-    """v0.2: without claude_agent_sdk, verify() raises VerifierUnavailable cleanly.
+def test_verifier_raises_unavailable_when_claude_cli_missing(monkeypatch):
+    """v0.2: without `claude` CLI on PATH, verify() raises VerifierUnavailable cleanly.
 
-    Auth path changed in v0.2 from anthropic SDK (required ANTHROPIC_API_KEY) to
-    claude_agent_sdk (inherits subscription auth from `claude` CLI). The
-    "missing dep" failure is now keyed off claude_agent_sdk.
+    Auth path = subprocess `claude -p ...`. The "missing dep" failure is
+    keyed off the CLI binary being unreachable. Forced via empty PATH so
+    shutil.which returns None.
     """
-    import sys
-
     from edp.verifier import VerifierUnavailable, verify
 
-    # Force ImportError on `from claude_agent_sdk import ...` inside _verify_async
-    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
-    with pytest.raises(VerifierUnavailable, match="claude_agent_sdk not installed"):
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(VerifierUnavailable, match="`claude` CLI not on PATH"):
         verify("any action", [])
 
 
