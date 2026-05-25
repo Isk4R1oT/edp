@@ -16,20 +16,29 @@ from edp.models import Decision
 # every-turn injection (waste of tokens).
 PROTOCOL_PRIMER = (
     '<edp:protocol>\n'
-    "You have access to EDP — Explicit Decision Protocol. Four tools available\n"
+    "You have access to EDP — Explicit Decision Protocol. Five tools available\n"
     "(prefixed by your harness, e.g. mcp__edp__* in MCP):\n"
     "\n"
-    "  edp_record(title, decision, key_constraints, evidence, ...)\n"
+    "  edp_record(title, decision, key_constraints, evidence, invariants=[], ...)\n"
     "    Commit an architectural decision. You are autonomous — record what\n"
     "    your future-self should respect; do NOT wait for human approval.\n"
-    "    provisional=False by default. Use revision_conditions for event-based\n"
-    "    re-examination triggers (e.g. 'latency p95 > 50ms'); separate from\n"
-    "    time-based review_due_at_step.\n"
+    "    provisional=False by default. invariants are machine-checkable\n"
+    "    predicates the verifier enforces (e.g. 'all responses MUST be JSON,\n"
+    "    not XML'); key_constraints are human-facing constraints shown in\n"
+    "    the snippet. Use revision_conditions for event-based re-examination\n"
+    "    triggers (e.g. 'latency p95 > 50ms'); separate from time-based\n"
+    "    review_due_at_step.\n"
     "\n"
     "  edp_check(planned_action)\n"
-    "    Before risky or scope-affecting moves, surface active decisions that\n"
-    "    may constrain. Lexical FTS5 match — phrase action with the same words\n"
-    "    your decisions use.\n"
+    "    SOFT advisory: surface decisions that may apply to a planned move.\n"
+    "    Lexical FTS5 match — fast, free, useful for routine pre-action scans.\n"
+    "\n"
+    "  edp_verify(planned_action)\n"
+    "    HARD pre-action check: a cheap external model reads your planned\n"
+    "    action and active invariants, returns compatible | violated |\n"
+    "    uncertain with violated_decision_ids cited. Use before irreversible\n"
+    "    or scope-affecting actions. On 'violated': do NOT execute — either\n"
+    "    revise the plan or call edp_supersede if the decision should change.\n"
     "\n"
     "  edp_show(decision_id)\n"
     "    Full body (decision, evidence, alternatives, history) when the\n"
@@ -40,7 +49,10 @@ PROTOCOL_PRIMER = (
     "    decision; if it must change, supersede explicitly.\n"
     "\n"
     "EDP is your own working memory of architectural commitments across\n"
-    "sessions. The <edp:active> block below is your binding context.\n"
+    "sessions. The <edp:active> block below is your binding context. Snippet\n"
+    "headline markers: inv:N = N invariants the verifier will check;\n"
+    "alts:N = N alternatives previously rejected; risks:N = N consequences\n"
+    "to weigh; triggers:N = N revision_conditions you should watch for.\n"
     '</edp:protocol>\n'
 )
 
@@ -58,6 +70,19 @@ def render_snippet(dec: Decision, *, max_constraints: int = 3) -> str:
         parts.append(f"conf={dec.confidence:.2g}")
     if dec.review_due_at_step is not None:
         parts.append(f"due=step:{dec.review_due_at_step}")
+    if dec.invariants:
+        # v0.2: machine-checkable predicates the verifier consumes; surfacing
+        # the count puts the agent on notice that edp_verify is the right
+        # pre-action check here, not just edp_check.
+        parts.append(f"inv:{len(dec.invariants)}")
+    if dec.alternatives:
+        # D's R2: previously dropped rationales (rejected alternatives) become
+        # visible at the attention sink so the agent does not re-open them.
+        parts.append(f"alts:{len(dec.alternatives)}")
+    if dec.consequences:
+        # Surface as risks:N so the agent knows there's downside-context to
+        # fetch via edp_show before acting against this decision.
+        parts.append(f"risks:{len(dec.consequences)}")
     if dec.revision_conditions:
         parts.append(f"triggers:{len(dec.revision_conditions)}")
     if dec.superseded_by is not None:
@@ -100,9 +125,10 @@ def wrap_active_block(
     if trimmed:
         footer_count += f" (showing {total_active - trimmed}; {trimmed} trimmed for budget)"
     footer = (
-        f"\n{footer_count} · `edp.show(id)` for full body · "
-        f"`edp.check(action)` before risky moves · "
-        f"`edp.record(...)` to commit a new decision\n"
+        f"\n{footer_count} · `edp.show(id)` full body · "
+        f"`edp.check(action)` soft advisory · "
+        f"`edp.verify(action)` HARD pre-action check · "
+        f"`edp.record(...)` to commit\n"
         f"If multiple <edp:active> blocks appear in this context, use only "
         f"version=\"{version}\" — earlier blocks are stale."
     )
@@ -155,6 +181,16 @@ def render_full_markdown(dec: Decision) -> str:
         lines.append("")
         for i, a in enumerate(dec.alternatives, 1):
             lines.append(f"{i}. **{a.label}**. REJECTED: {a.rejected_because}")
+        lines.append("")
+
+    if dec.invariants:
+        lines.append("## Invariants")
+        lines.append("")
+        lines.append("> Machine-checkable predicates the verifier enforces before each action.")
+        lines.append("> Each MUST be assertable (per spec §3.6 v0.2).")
+        lines.append("")
+        for i, inv in enumerate(dec.invariants, 1):
+            lines.append(f"- INV-{i}: {inv}")
         lines.append("")
 
     if dec.key_constraints:

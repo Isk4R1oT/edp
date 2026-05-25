@@ -8,6 +8,98 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-25
+
+The "source-doc alignment" release. v0.2 closes the philosophical gap
+the 4-agent audit caught: the original source `decision-protocol-template.md`
+defines `invariants` + a pre-action verifier as the load-bearing mechanism
+that makes decision drift recoverable. v0.1 deliberately ran the
+visibility-only experiment; v0.2 adds the verifier-gate path back, on top
+of v0.1's visibility primitive, so implementations have BOTH mechanisms
+available and can choose per use case.
+
+### Added
+
+- **`invariants: list[str]` field on `Decision`** — machine-checkable
+  predicates the verifier enforces. ≤200 chars each. Distinct from
+  `key_constraints` (which remain the human-facing summary surfaced
+  in the snippet block). Round-trips through `store.record`,
+  `store.supersede`, the MCP `edp_record` / `edp_supersede` tools,
+  and the markdown projection.
+- **`edp.verifier` module** — `verify(planned_action, active_decisions)`
+  → `CompatibilityReport(verdict, reasoning, violated_decision_ids)`.
+  Calls a Haiku-class model via the Anthropic SDK with structured
+  tool_use; defaults to `claude-haiku-4-5-20251001` (overridable via
+  `EDP_VERIFIER_MODEL`). Optional dependency: install with
+  `pip install 'explicit-decision-protocol[verifier]'`.
+- **`edp_verify(planned_action)` MCP tool** — HARD pre-action check
+  exposed to the agent, alongside the existing SOFT `edp_check`. Returns
+  `CompatibilityReport`. Falls through to `verdict="uncertain"` with
+  reasoning when the verifier dependency is unavailable, so the agent
+  always gets a meaningful response.
+- **`edp.verifier_hook` module** — Claude Code `PreToolUse` hook
+  implementation. Reads the planned tool call, runs the verifier
+  against active decisions' invariants, returns `permissionDecision:
+  "deny"` with citation reasoning on `violated`. Fails OPEN by default
+  (never breaks the user's session because of missing verifier infra);
+  set `EDP_VERIFIER_REQUIRED=1` to fail closed.
+- **`edp claude-code install --enable-verifier`** — installs the
+  `PreToolUse` hook on write-class tools (Edit | Write | Bash |
+  str_replace_editor). The matcher targets only state-mutating tools
+  per the source `decision-framework-reliability.md` §7 ("Cheap checks
+  везде, expensive в Pareto 20% high-risk actions"). Opt-in for v0.2;
+  on-by-default tentatively scheduled for v0.3 once the visibility-vs-
+  gating effect is measured by the benchmark.
+- **Snippet markers `inv:N`, `alts:N`, `risks:N`** — `render_snippet`
+  surfaces previously-dropped fields in the attention-sink so the agent
+  knows what to fetch via `edp_show` before acting. `alts:N` and
+  `risks:N` close the gap D's audit named: rejected alternatives and
+  consequences were already in the data model but invisible at the
+  per-turn snippet.
+- **`## Invariants` section in full-body markdown projection** — with a
+  human-facing explanation of the assertable-predicate contract.
+- **19 new unit tests** in `test_invariants_and_verifier.py` covering
+  invariants round-trip, supersede-chain invariant preservation, length
+  validation, snippet markers, primer + footer updates, verifier_hook
+  fail-open vs fail-closed, install/uninstall with `--enable-verifier`.
+
+### Changed
+
+- **`PROTOCOL_PRIMER` updated to describe FIVE tools** (added
+  `edp_verify`) plus the four snippet markers (`inv:N`, `alts:N`,
+  `risks:N`, `triggers:N`). Token count ~360 (up from ~280).
+- **Active-block footer mentions `edp.verify(action)`** as HARD
+  pre-action check alongside the SOFT `edp.check(action)` advisory.
+- **`SPEC.md §3.6` rewritten** (already shipped in v0.1.4 commit
+  `69c831f`) — steelman of the visibility-only thesis + sketch of the
+  v0.2 verifier extension point that this release implements.
+
+### Why now
+
+Two independent audits (`.planning/research/source-vs-current-diff.md`
+and `.planning/research/anthropic-grade-audit-2026-05-25.md`)
+converged on the same gap: v0.1's `key_constraints + edp_check` is at
+the wrong level of the user's own reliability hierarchy (visibility ≈
+Level 0; the source mapped decision drift to Level 3 = programmatic
+invariants + pre-action verifier). Empirical confirmation in our own
+data: the naturalistic test Turn 2 FAIL (`consults_count: 0`) shows
+visibility-alone did not prevent silent drift on `gpt-4.1-mini`. v0.2
+ships the gating mechanism the source design called for, opt-in, so
+the upcoming benchmark can quantify the marginal effect of gating-on-
+top-of-visibility vs visibility-alone.
+
+### Not in this release (deferred to v0.2.1 / v0.3)
+
+- `edp_due` + `edp_review` MCP tools — D's audit flagged
+  `store.due()` and `review_history` as half-wired dead branches; the
+  storage layer is ready but no MCP tool exposes them, no hook fires
+  on subtask boundary. Wiring deferred to v0.2.1 (~2-3 days).
+- Verifier `on-by-default` — kept opt-in for v0.2 so the benchmark can
+  cleanly A/B test gating vs no-gating without a measurement
+  confounder. v0.3 will flip the default based on benchmark results.
+- Conformance test suite + TypeScript SDK — audit `CRIT-1` and `CRIT-3`
+  from the MCP-co-author audit. Tracked for v0.3.
+
 ## [0.1.3] — 2026-05-25
 
 ### Added

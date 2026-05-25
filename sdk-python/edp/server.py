@@ -11,7 +11,7 @@ from typing import Optional
 
 from fastmcp import FastMCP
 
-from edp.models import Decision, RelevanceReport
+from edp.models import CompatibilityReport, Decision, RelevanceReport
 from edp.selector import get_active_block
 from edp.store import DecisionStore
 
@@ -40,6 +40,11 @@ _SUPERSEDE_ANNOTATIONS = {
     "destructiveHint": True,  # mutates the old record's status
     "idempotentHint": False,
     "openWorldHint": False,
+}
+_VERIFY_ANNOTATIONS = {
+    "readOnlyHint": True,  # verifier checks; never mutates
+    "idempotentHint": False,  # calls a cheap external model — result may vary
+    "openWorldHint": True,  # talks to Anthropic API
 }
 
 
@@ -91,6 +96,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         evidence: list[str],
         confidence: float = 0.7,
         tags: Optional[list[str]] = None,
+        invariants: Optional[list[str]] = None,
         revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
         provisional: bool = False,
@@ -103,6 +109,11 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         treat your past commitments as binding. Use decision-worthiness criteria
         from spec §3.7 (multi-turn consequence, constraint-shaped, hard to
         re-derive, reversibility-relevant — at least two must hold).
+
+        invariants (v0.2) are machine-checkable predicates the verifier
+        enforces — phrase each as an assertable rule the verifier can compare
+        a planned action against (e.g. "all new endpoints MUST return JSON,
+        not XML"). Distinct from key_constraints, which are human-facing.
 
         provisional=False is the default: you are committing. Set provisional=True
         ONLY when (a) your confidence is below ~0.5 AND (b) you cannot supersede
@@ -128,6 +139,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            invariants=invariants or [],
             revision_conditions=revision_conditions or [],
             evidence=evidence,
             confidence=confidence,
@@ -146,6 +158,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         key_constraints: list[str],
         evidence: list[str],
         confidence: float = 0.7,
+        invariants: Optional[list[str]] = None,
         revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
         step: Optional[int] = None,
@@ -175,6 +188,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            invariants=invariants or [],
             revision_conditions=revision_conditions or [],
             evidence=evidence,
             confidence=confidence,
@@ -182,6 +196,51 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             step=step if step is not None else version_state["n"],
             actor="agent",
         )
+
+    @mcp.tool(annotations=_VERIFY_ANNOTATIONS)
+    def edp_verify(planned_action: str) -> CompatibilityReport:
+        """Verify a planned action against active decisions' invariants.
+
+        Per spec §3.6 (v0.2): given a one-line description of what you are
+        about to do, the verifier checks it against the invariants of every
+        active decision and returns one of three verdicts:
+
+          - "compatible": no active invariant is violated; proceed
+          - "violated": at least one invariant is violated; do NOT execute.
+                         violated_decision_ids names which decisions; cite
+                         them when you escalate or call edp_supersede.
+          - "uncertain": the verifier needs more evidence; escalate to user
+                         or call edp_show on a flagged decision to gather it
+
+        Stricter than edp_check (which is lexical/advisory). Verifier calls
+        a cheap external model (Haiku-class) and may cost ~$0.001/call. Use
+        before irreversible or scope-affecting actions; for read-only or
+        already-compatible actions, edp_check is sufficient.
+
+        Requires the [verifier] extra installed and ANTHROPIC_API_KEY set.
+        If the verifier is unavailable, returns verdict="uncertain" with
+        reasoning naming the missing dependency — the agent decides whether
+        to proceed.
+
+        Example:
+            edp_verify("add XML serializer to GET /reports endpoint")
+              → CompatibilityReport(
+                  verdict="violated",
+                  reasoning="DEC-0002 invariant 'no XML serialisation in new endpoints' directly contradicts adding an XML serializer.",
+                  violated_decision_ids=["DEC-0002"],
+                )
+        """
+        from edp.verifier import VerifierUnavailable, verify
+
+        active = store.list_active()
+        try:
+            return verify(planned_action, active)
+        except VerifierUnavailable as e:
+            return CompatibilityReport(
+                verdict="uncertain",
+                reasoning=f"verifier unavailable: {e}",
+                violated_decision_ids=[],
+            )
 
     @mcp.resource("decisions://active")
     def active_block() -> str:

@@ -239,9 +239,15 @@ claude_code_app = typer.Typer(
 app.add_typer(claude_code_app, name="claude-code")
 
 
-def _settings_json(python_bin: str) -> dict:
-    """Build the .claude/settings.json content for SessionStart + UserPromptSubmit hooks."""
-    return {
+def _settings_json(python_bin: str, *, enable_verifier: bool = False) -> dict:
+    """Build the .claude/settings.json content for SessionStart + UserPromptSubmit hooks.
+
+    If enable_verifier=True, also adds a PreToolUse hook on write-class tools
+    (Edit|Write|Bash|str_replace_editor) that invokes the EDP verifier per spec
+    §3.6 (v0.2). The verifier requires the [verifier] extra + ANTHROPIC_API_KEY;
+    it fails open by default (set EDP_VERIFIER_REQUIRED=1 to fail closed).
+    """
+    config: dict = {
         "hooks": {
             "SessionStart": [
                 {
@@ -261,6 +267,16 @@ def _settings_json(python_bin: str) -> dict:
             ],
         }
     }
+    if enable_verifier:
+        config["hooks"]["PreToolUse"] = [
+            {
+                "matcher": "Edit|Write|Bash|str_replace_editor",
+                "hooks": [
+                    {"type": "command", "command": f"{python_bin} -m edp.verifier_hook"}
+                ],
+            }
+        ]
+    return config
 
 
 def _mcp_json(store_path: str) -> dict:
@@ -296,7 +312,12 @@ def _has_our_hook(existing: dict, event: str) -> bool:
     """True if an existing settings.json already has an EDP-style hook for the given event."""
     for entry in (existing.get("hooks") or {}).get(event, []):
         for h in entry.get("hooks", []):
-            if "edp.hook" in (h.get("command") or "") or "edp_hook.py" in (h.get("command") or ""):
+            cmd = h.get("command") or ""
+            if (
+                "edp.hook" in cmd
+                or "edp_hook.py" in cmd
+                or "edp.verifier_hook" in cmd
+            ):
                 return True
     return False
 
@@ -323,6 +344,16 @@ def claude_code_install(
         True,
         "--init/--no-init",
         help="Run `edp init` to create .edp/ if it does not exist (default: yes)",
+    ),
+    enable_verifier: bool = typer.Option(
+        False,
+        "--enable-verifier",
+        help=(
+            "Install the pre-action verifier hook (spec §3.6 v0.2). Requires "
+            "'pip install explicit-decision-protocol[verifier]' + "
+            "ANTHROPIC_API_KEY. Fails open by default (set EDP_VERIFIER_REQUIRED=1 "
+            "in the hook env to fail closed)."
+        ),
     ),
 ) -> None:
     """Install the EDP hook + MCP server + slash commands into a Claude Code project.
@@ -364,7 +395,7 @@ def claude_code_install(
     # 3. Write settings.json — merge with existing if present
     python_bin = sys.executable
     settings_path = target / "settings.json"
-    new_settings = _settings_json(python_bin)
+    new_settings = _settings_json(python_bin, enable_verifier=enable_verifier)
     if settings_path.exists():
         try:
             existing = json.loads(settings_path.read_text())
@@ -449,6 +480,18 @@ def claude_code_install(
     typer.echo()
     typer.echo(f"Hook command in {settings_path.name}:")
     typer.echo(f"  {python_bin} -m edp.hook ...")
+    if enable_verifier:
+        typer.echo()
+        typer.secho(
+            "Verifier hook installed (PreToolUse).",
+            fg=typer.colors.CYAN,
+            bold=True,
+        )
+        typer.echo("  - Matches Edit | Write | Bash | str_replace_editor")
+        typer.echo("  - Requires `pip install explicit-decision-protocol[verifier]`")
+        typer.echo("  - Requires ANTHROPIC_API_KEY in env")
+        typer.echo("  - Fail-open by default; set EDP_VERIFIER_REQUIRED=1 to fail closed")
+        typer.echo("  - Verifier runs only when at least one active decision has invariants")
 
 
 @claude_code_app.command("uninstall")
@@ -479,7 +522,7 @@ def claude_code_uninstall(
         else:
             hooks_block = dict(existing.get("hooks") or {})
             changed = False
-            for event in ("SessionStart", "UserPromptSubmit"):
+            for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
                 if event not in hooks_block:
                     continue
                 kept = []
@@ -488,6 +531,7 @@ def claude_code_uninstall(
                         h for h in entry.get("hooks", [])
                         if "edp.hook" not in (h.get("command") or "")
                         and "edp_hook.py" not in (h.get("command") or "")
+                        and "edp.verifier_hook" not in (h.get("command") or "")
                     ]
                     if surviving_hooks:
                         entry["hooks"] = surviving_hooks

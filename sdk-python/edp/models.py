@@ -51,6 +51,7 @@ class Decision(BaseModel):
     superseded_by: Optional[str] = None
     review_due_at_step: Optional[int] = Field(default=None, ge=0)
     key_constraints: list[str] = Field(default_factory=list)
+    invariants: list[str] = Field(default_factory=list)
     revision_conditions: list[str] = Field(default_factory=list)
     context: Optional[str] = None
     alternatives: list[Alternative] = Field(default_factory=list)
@@ -73,6 +74,20 @@ class Decision(BaseModel):
         for kc in v:
             if len(kc) > 140:
                 raise ValueError(f"key_constraint exceeds 140 chars: {kc[:30]}...")
+        return v
+
+    @field_validator("invariants")
+    @classmethod
+    def _validate_invariants(cls, v: list[str]) -> list[str]:
+        # invariants are machine-checkable predicates intended for the verifier;
+        # 200-char budget gives room for predicate-shaped statements like
+        # "all entries in competitor_list must have segment in ['enterprise']".
+        # Per spec §3.6 each entry SHOULD be assertable — but the SDK does not
+        # enforce this structurally (free text in v0.2; structured DSL is a v0.3
+        # consideration).
+        for inv in v:
+            if len(inv) > 200:
+                raise ValueError(f"invariant exceeds 200 chars: {inv[:30]}...")
         return v
 
     @field_validator("revision_conditions")
@@ -98,6 +113,31 @@ class RelevanceReport(BaseModel):
     related: list[RelevanceMatch] = Field(default_factory=list)
 
 
+Verdict = Literal["compatible", "violated", "uncertain"]
+
+
+class CompatibilityReport(BaseModel):
+    """Pre-action verifier verdict: does a planned action violate active invariants?
+
+    Returned by `edp_verify(planned_action)` and by the optional PreToolUse
+    verifier hook. Per spec §3.6 (v0.2):
+
+      - `compatible`: no active invariant is violated by the planned action
+      - `violated`: at least one invariant is violated; do not execute
+      - `uncertain`: the verifier needs more evidence; escalate or supersede
+
+    `violated_decision_ids` lists the decisions whose invariants the verifier
+    found violated; populated only when verdict == "violated". `reasoning` is
+    a short natural-language explanation suitable for surfacing to the agent
+    so it can correct the planned action or call `edp_supersede` if the
+    decision should change.
+    """
+
+    verdict: Verdict
+    reasoning: str
+    violated_decision_ids: list[str] = Field(default_factory=list)
+
+
 class Event(BaseModel):
     """A single immutable event from the append-only log (§7.1)."""
 
@@ -105,7 +145,16 @@ class Event(BaseModel):
     ts: datetime
     actor: str
     decision_id: str
-    op: Literal["record", "supersede", "superseded_by", "revise", "deprecate", "reject", "review"]
+    op: Literal[
+        "record",
+        "supersede",
+        "superseded_by",
+        "revise",
+        "deprecate",
+        "reject",
+        "review",
+        "verify",
+    ]
     payload: dict
 
 

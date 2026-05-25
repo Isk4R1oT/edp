@@ -1,7 +1,8 @@
 # Explicit Decision Protocol — Specification
 
-**Version:** `edp/2026-05-24` (v0.1)
-**Status:** v0.1 frozen. Subsequent additions are non-breaking under the same date until a breaking change requires a new version date. Breaking changes expected before v1.0.
+**Version:** `edp/2026-05-25` (v0.2)
+**Prior:** `edp/2026-05-24` (v0.1, tag `v0.1.0-spec`) — v0.2 is a non-breaking extension that adds the `invariants` field on `Decision` (optional, defaults to `[]`) and the `verifier_hook` extension surface sketched in §3.6. v0.1 implementations remain conformant.
+**Status:** v0.2 adds the source-doc-aligned `invariants + pre-action verifier` mechanism as an opt-in extension while preserving the v0.1 `key_constraints + edp_check` visibility primitive. Operators choose which to enable. Breaking changes expected before v1.0.
 
 ---
 
