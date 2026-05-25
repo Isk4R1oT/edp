@@ -4,12 +4,13 @@ This document gathers the research findings, open issues, and community signal t
 
 Citations are direct quotes from the linked source. All sources are public and retrievable.
 
-The arsenal is grouped into four buckets:
+The arsenal is grouped into five buckets:
 
-1. [Academic findings](#1-academic-findings) — research with numbers
-2. [Open GitHub issues](#2-open-github-issues--practitioner-pain) — practitioner reports
-3. [Community signal](#3-community-signal--hn--forums) — HN, dev blogs, forums
-4. [Coding-agent specifics](#4-coding-agent-specifics) — SWE-bench failure analysis and coding-specific drift
+1. [Academic findings](#1-academic-findings) — third-party research with numbers
+2. [Open GitHub issues](#2-open-github-issues--practitioner-pain) — third-party practitioner reports
+3. [Community signal](#3-community-signal--hn--forums) — third-party HN, dev blogs, forums
+4. [Coding-agent specifics](#4-coding-agent-specifics) — third-party SWE-bench failure analysis and coding-specific drift
+5. [Own dogfood findings](#5-own-dogfood-findings) — **first-party** evidence from our own blank-slate trials (clearly distinguished — N is small, methodology is documented)
 
 ---
 
@@ -328,6 +329,102 @@ Process Reward Model intervention boosts SWE-bench Verified **40.0% → 50.6% (+
 150 SWE-bench-Verified failures manually analyzed → 3 primary phases, 9 main categories, 25 fine-grained subcategories of failure modes.
 
 **Takeaway:** Authoritative failure-mode taxonomy. Drift / decision-loss show up across categories — the reference for "this is what's actually breaking".
+
+---
+
+## 5. Own dogfood findings
+
+This bucket is **first-party** — measurements we ran on the protocol
+ourselves. It is deliberately separated from §§1–4 (which are entirely
+third-party) so a reader can see at a glance whether a claim cites
+external work or our own runs. The N is small, the methodology is
+documented, and where the results are mixed we say so.
+
+### 5.1 Blank-slate trial on `tinycache` (Opus 4.7, May 2026)
+
+[`docs/dogfood-tinycache.md`](dogfood-tinycache.md)
+
+Two real Claude Code sessions on a project with `CLAUDE.md = 0 bytes`,
+no seeded decisions, and no user prompt mentioning EDP. The only EDP
+signal was the ~280-token protocol primer injected once on `SessionStart`.
+
+> Session 1: agent spontaneously recorded **4 decisions** during normal
+> design conversation (target ≥1, observed 4). Two of the four
+> populated the v0.1.1 `revision_conditions` field correctly without
+> being prompted; two left it empty where the decision was permanent.
+>
+> Session 2 (different topic, same store): agent formally superseded
+> one session-1 decision (`DEC-0002 → DEC-0005`) and deferred a feature
+> request (`DEC-0006`) by citing the `revision_conditions` field of a
+> session-1 decision (`DEC-0004`'s *"persistence or cross-process state
+> is added"*) as the trigger.
+
+**Takeaway:** the autonomous-adoption path is real on at least one
+high-end model in at least one harness. The cross-session causal link
+through `revision_conditions` works in production conditions, not just
+in unit tests.
+
+**Caveat:** N=1, single model (Opus 4.7), single project (tinycache),
+single user. Generalizes to nothing without a controlled study.
+
+### 5.2 Naturalistic LangGraph test on `gpt-4.1-mini` (May 2026)
+
+[`tests/integration/langgraph_naturalistic.py`](../tests/integration/langgraph_naturalistic.py) · trace at `.planning/research/naturalistic-2026-05-25.txt`
+
+Three-turn realistic task (tiny-tq library) with **no leading prompts**
+and primer-via-`inject_into_messages`. Strict pass criteria — designed
+to fail rather than flatter.
+
+| Turn | Criterion | Result |
+|---|---|---|
+| 1 (design) | ≥2 spontaneous `edp_record` on empty store | PASS (4 records) |
+| 2 (implementation) | ≥1 `edp_check`/`edp_show` consult | **FAIL** (0 — worked from snippet alone) |
+| 3 (conflict) | supersede OR refuse+cite, no silent comply | PASS (2 supersedes) |
+
+**Takeaway:** record and supersede behaviour on a mid-tier model is
+robust. Consult behaviour is not — when the snippet block already
+contains the relevant constraints, the agent acts on those directly
+without spending a tool call.
+
+**Honest note:** turn 2 is reported as a failure even though
+snippet-first reasoning is *the intended behavior* — the snippet block
+exists precisely so the agent does not need to consult on every turn.
+The criterion is stricter than the spec. We publish the strict
+criterion and the failure rather than loosen it. Self-serving
+relaxation of own metrics is the failure mode this whole project
+exists to push back against.
+
+### 5.3 Explicit LangGraph 6-turn integration test (May 2026)
+
+[`tests/integration/langgraph_demo.py`](../tests/integration/langgraph_demo.py)
+
+A different kind of test: this one **does** instruct the agent ("use
+`edp_show` on DEC-0001 first") and measures whether the tool path
+itself works end-to-end. 6/6 turns pass on `gpt-4.1-mini`. This proves
+the plumbing — store ↔ tools ↔ render ↔ snippet — not adoption.
+
+**Takeaway:** the protocol mechanics are wired correctly. This is a
+necessary but not sufficient condition for the adoption claims in §5.1
+and §5.2.
+
+### 5.4 What we have NOT yet measured
+
+- The Sprint-7 paired design (k=4 × 20-30 tasks, EDP-on vs EDP-off,
+  mid-tier model, controlled) per SPEC §11 — this is the statistically
+  meaningful experiment. The dogfood trials are calibration that
+  motivates funding the bigger study, not a substitute.
+- Multi-model comparison. We have Opus 4.7 (live, manual) and
+  `gpt-4.1-mini` (automated). No data on Sonnet, Haiku, Gemini, GPT-4o
+  yet.
+- Long-horizon behaviour at 50+ decisions in one store. The selector
+  has a `token_budget` and a trim policy; that path is unit-tested,
+  not yet dogfooded.
+- Adversarial pressure (comment-based, prompt-injection, etc.). The
+  drift literature shows real coding-agent attack surfaces (§§4.1, 1.10);
+  whether EDP resists them is an open question.
+
+These gaps are flagged here so a future audit can check what was
+measured against what was claimed.
 
 ---
 

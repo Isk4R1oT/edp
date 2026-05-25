@@ -114,6 +114,61 @@ See [`EXAMPLE.md`](EXAMPLE.md) for a full walkthrough of an agent session using 
 
 ---
 
+## Does it actually work?
+
+Short answer: in a blank-slate trial it does — the agent adopts the protocol
+on its own, and decisions made in one session shape actions in the next. Full
+trace at [`docs/dogfood-tinycache.md`](docs/dogfood-tinycache.md).
+
+The setup: empty project, **`CLAUDE.md` is `0 bytes`**, store is empty,
+nothing in any user prompt mentions EDP. The only thing telling the agent
+EDP exists is the ~280-token **protocol primer** the `SessionStart` hook
+injects once per session.
+
+**Session 1** (design phase, Opus 4.7 via Claude Code, normal design
+conversation about a tiny in-memory cache library):
+
+- Agent spontaneously recorded **4 decisions** at the points it was
+  committing to something architecturally non-trivial — API shape, scope,
+  policy contract, clock choice.
+- Two of them populated the v0.1.1 `revision_conditions` field correctly
+  on the first call (scope/persistence triggers). Two of them did not —
+  also correctly, because those decisions are permanent.
+- Two cited the user's **global** `CLAUDE.md` rules as evidence (per-project
+  was empty). The agent reached for the most relevant evidence source in
+  scope without being told where to look.
+
+**Session 2** (different topic, same store, one day later): the user asked
+about thread-safety and a possible Redis backend.
+
+- Agent formally **superseded** the v0 scope decision (`DEC-0002 → DEC-0005`)
+  to add a single `threading.Lock`. The supersede chain is preserved.
+- Agent recorded a **new decision deferring Redis** (`DEC-0006`), citing the
+  `revision_conditions` field of session-1's `DEC-0004` (`"persistence or
+  cross-process state is added"`) as the trigger and `DEC-0004`'s monotonic-
+  clock constraint as the technical blocker.
+
+That second action is the cross-session causal link in code: a commitment
+made in session 1 directly shaped an action in session 2 even though
+session 1's reasoning never appeared in session 2's conversation history.
+Final store: 5 active, 1 supersede chain, all writes are the agent's.
+
+**Honest caveats.** This is N=1, single model, single project, single user.
+A companion automated test on `gpt-4.1-mini` (`tests/integration/langgraph_naturalistic.py`)
+passes 2/3 strict criteria — the agent records and supersedes on cue, but on
+a follow-up implementation request it worked from the snippet visible in its
+context and never called `edp_check`/`edp_show`. We report this as a failure
+because the test is strict, even though snippet-first reasoning is what
+snippets exist for. Loosening the criterion to make our own test pass would
+be exactly the self-serving move EDP exists to prevent.
+
+For statistically meaningful claims, the SPEC §11 Sprint-7 paired design
+(k=4 × 20–30 tasks, EDP-on vs EDP-off, mid-tier model) is the gating
+experiment. That has not been run yet — the blank-slate trial is the
+calibration that decides whether the bigger study is worth funding.
+
+---
+
 ## Why a protocol, not a library
 
 EDP is a **specification + reference implementations**, in the spirit of MCP. A single library would lock the idea to one language and one harness. The spec describes the decision model, the snippet format, the four tools, and the adapter contract. Implementations follow. Reference implementations live in this repo; alternative implementations on any stack are welcome.
@@ -170,10 +225,12 @@ edp/
 - [x] Spec v0.1 frozen (tag `v0.1.0-spec`)
 - [x] Evidence pass (`docs/evidence.md`)
 - [x] Sample project layout (`examples/sample-project/`)
-- [x] Python SDK implementation (`sdk-python/`) — 37 unit tests, 6/6 integration on real LLM (gpt-4.1-mini)
-- [x] Claude Code adapter (standalone hooks form) — `adapters/claude-code-plugin/` · 7 hook tests + end-to-end smoke verified in live `claude` session
+- [x] Python SDK implementation (`sdk-python/`) — 48+ unit tests, 6/6 explicit integration on real LLM (gpt-4.1-mini) + 2/3 naturalistic (honest snippet-first failure on turn 2)
+- [x] Claude Code adapter (standalone hooks form) — `adapters/claude-code-plugin/` · 9 hook tests (incl. primer auto-inject on `SessionStart`) + blank-slate dogfood verified on Opus 4.7 ([trace](docs/dogfood-tinycache.md))
 - [x] MCP server adapter — `adapters/mcp-server/` · install matrix for Claude Desktop / CC / Cursor / Cline / Continue · 5/5 protocol probes pass via `smoke.py`
 - [x] LangGraph adapter — `adapters/middleware-langgraph/` · two injection modes (helper + middleware) · 2 runnable examples
+- [x] v0.1.1 — added `revision_conditions` event-based re-examination field, flipped `provisional` default to `False`
+- [x] v0.1.2 — protocol primer auto-injected on `SessionStart` (no per-project `CLAUDE.md` required) · naturalistic test harness
 - [ ] Claude Code plugin-manifest form (waiting on [claude-code#16538](https://github.com/anthropics/claude-code/issues/16538) upstream fix)
 - [ ] Cursor watcher (`.cursor/rules/edp-active.mdc` daemon — post-Sprint-3a)
 - [ ] Vercel AI SDK middleware (TS — post-Sprint-3a)

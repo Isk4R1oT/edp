@@ -85,10 +85,26 @@ The model should quote your seeded `DEC-0001` snippet word-for-word. If it can't
 A small Python script that fires on `SessionStart` and `UserPromptSubmit`. It:
 - Walks up from cwd to find the nearest `.edp/`
 - Bumps a per-session monotonic version counter (`.edp/.session_version`)
-- Calls `edp inject --version N`
+- Calls `edp inject --version N` (with `--primer` on `SessionStart`)
 - Emits `hookSpecificOutput.additionalContext` per the Claude Code hook protocol
 
 Fail-soft by design: no `.edp/`, no `edp` binary, hook script error — none of these break your Claude Code session, they just silently skip the injection that turn.
+
+### Protocol primer (auto-injected, no `CLAUDE.md` required)
+
+You do **not** need to write anything in your project's `CLAUDE.md` to use
+EDP. The `SessionStart` hook injects a one-time ~280-token **protocol
+primer** describing the four tools, the autonomous stance, and the
+`provisional` flag. An agent that has never seen EDP before discovers it
+through that primer on its first turn.
+
+Per-turn (`UserPromptSubmit`) injections omit the primer — only the active
+snippet block is repeated — to keep ongoing token cost minimal.
+
+This is what makes the blank-slate trial at
+[`docs/dogfood-tinycache.md`](../../docs/dogfood-tinycache.md) work: empty
+`CLAUDE.md`, empty store, no user prompt mentioning EDP, and the agent
+still records and supersedes decisions autonomously.
 
 ### MCP server (`edp-mcp-server`)
 Registered in `.mcp.json` so Claude Code starts it automatically. Exposes:
