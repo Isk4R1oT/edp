@@ -369,7 +369,7 @@ single user. Generalizes to nothing without a controlled study.
 
 ### 5.2 Naturalistic LangGraph test on `gpt-4.1-mini` (May 2026)
 
-[`tests/integration/langgraph_naturalistic.py`](../tests/integration/langgraph_naturalistic.py) · trace at `.planning/research/naturalistic-2026-05-25.txt`
+[`tests/integration/langgraph_naturalistic.py`](../tests/integration/langgraph_naturalistic.py) — reproducible with `OPENROUTER_API_KEY`
 
 Three-turn realistic task (tiny-tq library) with **no leading prompts**
 and primer-via-`inject_into_messages`. Strict pass criteria — designed

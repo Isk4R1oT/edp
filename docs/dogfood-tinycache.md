@@ -225,9 +225,10 @@ running it.
 
 ## Reproducing this trial
 
-The raw artifacts are at `/tmp/edp-blank/` on the author's machine and
-are not committed to the repo (small private project state). To
-reproduce:
+The raw `tinycache` project artifacts are local-only and not committed
+to this repo (they are throwaway code written by the agent during the
+trial). The decision bodies above are the load-bearing evidence, and
+they are reproducible. To run your own trial:
 
 1. Install EDP per `README.md` Quick install.
 2. Create the empty project as in the **Setup** section above.
@@ -254,7 +255,8 @@ human-in-the-loop), lives at
 `tests/integration/langgraph_naturalistic.py`. It runs three turns
 against `gpt-4.1-mini` via OpenRouter using the LangGraph binding and
 the primer-via-`inject_into_messages` path. Scorecard from the most
-recent run (2026-05-25, see `.planning/research/naturalistic-2026-05-25.txt`):
+recent run (2026-05-25) — reproduce by running the script with
+`OPENROUTER_API_KEY` set:
 
 | Turn | What is measured | Result |
 |---|---|---|
