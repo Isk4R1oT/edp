@@ -1,0 +1,37 @@
+# benchmark/pyproject.toml — installable wrapper for the placebo MCP server
+# and the runner CLI. Install with `pip install -e benchmark/` from the
+# repository root.
+#
+# This is intentionally a separate package from `explicit-decision-protocol`
+# itself — the benchmark must be installable independently for third-party
+# reproducibility, but should NOT pollute the EDP runtime dependency tree.
+
+[project]
+name = "edp-benchmark"
+version = "0.2.0"
+description = "Paired-comparison benchmark for the Explicit Decision Protocol (EDP v0.2.0)"
+requires-python = ">=3.11"
+license = {text = "MIT"}
+dependencies = [
+    "explicit-decision-protocol>=0.2.0",
+    "claude-agent-sdk>=0.1.0",
+    "anthropic>=0.40.0",
+    "fastmcp>=3.3.0",
+    "scipy>=1.13.0",
+    "numpy>=1.26.0",
+]
+
+[project.scripts]
+# Placebo MCP server invoked by condition C of the benchmark.
+fern-mcp-server = "benchmark.placebo:main"
+# Runner CLI.
+edp-benchmark-run = "benchmark.runner:main"
+edp-benchmark-dry-run = "benchmark.dry_run:main"
+edp-benchmark-analyze = "benchmark.analysis.analyze:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["benchmark*"]
