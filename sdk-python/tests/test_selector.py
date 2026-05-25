@@ -26,7 +26,9 @@ def test_block_has_version_and_precedence_line(tmp_store):
 
 def test_empty_store_renders_placeholder(tmp_store):
     result = get_active_block(tmp_store, version=1)
-    assert "(no active decisions)" in result.text
+    # v0.1.2: empty placeholder mentions edp_record to guide first-time agents
+    assert "no active decisions" in result.text
+    assert "edp_record" in result.text
     assert result.included == 0
     assert result.total_active == 0
 

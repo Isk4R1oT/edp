@@ -124,9 +124,17 @@ def main() -> int:
 
     version = next_version(edp_dir / ".session_version")
 
+    # Include the protocol primer ONLY in SessionStart blocks — once-per-session
+    # onboarding so an agent that has never used EDP discovers the four tools
+    # and autonomous stance without per-project CLAUDE.md. UserPromptSubmit
+    # injects without primer to keep per-turn token cost minimal.
+    inject_args = ["inject", "--store", str(edp_dir), "--version", str(version)]
+    if event_name == "SessionStart":
+        inject_args.append("--primer")
+
     try:
         result = subprocess.run(
-            edp_invocation + ["inject", "--store", str(edp_dir), "--version", str(version)],
+            edp_invocation + inject_args,
             capture_output=True,
             text=True,
             timeout=3,

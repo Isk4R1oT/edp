@@ -46,6 +46,7 @@ def get_active_block(
     version: int = 1,
     context_tags: Optional[list[str]] = None,
     policy: Optional[SelectorPolicy] = None,
+    include_primer: bool = False,
 ) -> ActiveBlockResult:
     """Build the `<edp:active>` block for injection.
 
@@ -121,6 +122,7 @@ def get_active_block(
         version=version,
         total_active=total_active,
         trimmed=trimmed,
+        include_primer=include_primer,
     )
     return ActiveBlockResult(
         text=text,

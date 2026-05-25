@@ -8,6 +8,43 @@ from __future__ import annotations
 from edp.models import Decision
 
 
+# Protocol primer — short onboarding block that adapters MAY inject once per
+# session (typically on SessionStart) so an agent that has never used EDP
+# discovers the four tools and the autonomous stance without needing a
+# per-project CLAUDE.md or other manual setup. Per spec §8.1, including the
+# primer is RECOMMENDED for first-injection-per-session and DISCOURAGED on
+# every-turn injection (waste of tokens).
+PROTOCOL_PRIMER = (
+    '<edp:protocol>\n'
+    "You have access to EDP — Explicit Decision Protocol. Four tools available\n"
+    "(prefixed by your harness, e.g. mcp__edp__* in MCP):\n"
+    "\n"
+    "  edp_record(title, decision, key_constraints, evidence, ...)\n"
+    "    Commit an architectural decision. You are autonomous — record what\n"
+    "    your future-self should respect; do NOT wait for human approval.\n"
+    "    provisional=False by default. Use revision_conditions for event-based\n"
+    "    re-examination triggers (e.g. 'latency p95 > 50ms'); separate from\n"
+    "    time-based review_due_at_step.\n"
+    "\n"
+    "  edp_check(planned_action)\n"
+    "    Before risky or scope-affecting moves, surface active decisions that\n"
+    "    may constrain. Lexical FTS5 match — phrase action with the same words\n"
+    "    your decisions use.\n"
+    "\n"
+    "  edp_show(decision_id)\n"
+    "    Full body (decision, evidence, alternatives, history) when the\n"
+    "    snippet headline isn't enough.\n"
+    "\n"
+    "  edp_supersede(old_id, ...)\n"
+    "    Formal replace — preserves chain. Never silently bypass an active\n"
+    "    decision; if it must change, supersede explicitly.\n"
+    "\n"
+    "EDP is your own working memory of architectural commitments across\n"
+    "sessions. The <edp:active> block below is your binding context.\n"
+    '</edp:protocol>\n'
+)
+
+
 def render_snippet(dec: Decision, *, max_constraints: int = 3) -> str:
     """Render one decision as a 2–4 line snippet for the active block.
 
@@ -46,20 +83,33 @@ def wrap_active_block(
     version: int,
     total_active: int,
     trimmed: int = 0,
+    include_primer: bool = False,
 ) -> str:
     """Wrap snippets into the spec-mandated <edp:active version="N"> block.
 
-    Includes the mandatory precedence line per §4.2.
+    Includes the mandatory precedence line per §4.2. If include_primer is True,
+    the PROTOCOL_PRIMER is prepended — recommended on first-injection-per-session
+    (typically SessionStart hooks), discouraged on every-turn injection.
     """
-    body = "\n".join(snippets) if snippets else "(no active decisions)"
+    empty_hint = (
+        "(no active decisions yet — this is your working memory; "
+        "record commitments your future-self should respect via edp_record)"
+    )
+    body = "\n".join(snippets) if snippets else empty_hint
     footer_count = f"Active: {total_active}"
     if trimmed:
         footer_count += f" (showing {total_active - trimmed}; {trimmed} trimmed for budget)"
     footer = (
-        f"\n{footer_count} · `edp.show(id)` for full body · `edp.check(action)` before risky moves\n"
-        f"If multiple <edp:active> blocks appear in this context, use only version=\"{version}\" — earlier blocks are stale."
+        f"\n{footer_count} · `edp.show(id)` for full body · "
+        f"`edp.check(action)` before risky moves · "
+        f"`edp.record(...)` to commit a new decision\n"
+        f"If multiple <edp:active> blocks appear in this context, use only "
+        f"version=\"{version}\" — earlier blocks are stale."
     )
-    return f'<edp:active version="{version}">\n{body}\n{footer}\n</edp:active>'
+    block = f'<edp:active version="{version}">\n{body}\n{footer}\n</edp:active>'
+    if include_primer:
+        return PROTOCOL_PRIMER + "\n" + block
+    return block
 
 
 def render_full_markdown(dec: Decision) -> str:

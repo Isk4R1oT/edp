@@ -72,6 +72,41 @@ def test_wrap_active_block_includes_precedence():
     assert 'use only version="3"' in text
 
 
+def test_wrap_active_block_no_primer_by_default():
+    text = wrap_active_block(["DEC-0001 [active]\n  Title: x"], version=1, total_active=1)
+    assert "<edp:protocol>" not in text
+
+
+def test_wrap_active_block_primer_when_flag():
+    text = wrap_active_block(
+        ["DEC-0001 [active]\n  Title: x"],
+        version=1,
+        total_active=1,
+        include_primer=True,
+    )
+    assert "<edp:protocol>" in text
+    assert "</edp:protocol>" in text
+    assert "edp_record" in text
+    assert "edp_check" in text
+    assert "edp_show" in text
+    assert "edp_supersede" in text
+    # Primer must come BEFORE the active block, so agent sees onboarding first
+    assert text.index("<edp:protocol>") < text.index("<edp:active")
+
+
+def test_empty_block_includes_record_hint():
+    text = wrap_active_block([], version=1, total_active=0)
+    # New v0.1.2 hint: empty placeholder mentions edp_record explicitly
+    assert "edp_record" in text
+
+
+def test_footer_lists_all_three_tool_hints():
+    text = wrap_active_block(["x"], version=1, total_active=1)
+    assert "edp.show" in text
+    assert "edp.check" in text
+    assert "edp.record" in text
+
+
 def test_full_markdown_has_frontmatter():
     d = _dec(
         context="Some context here.",

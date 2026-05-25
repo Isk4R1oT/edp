@@ -136,3 +136,21 @@ def test_hook_includes_precedence_line(project_with_store):
     block = json.loads(result.stdout.strip())["hookSpecificOutput"]["additionalContext"]
     assert "use only version=" in block
     assert "earlier blocks are stale" in block
+
+
+def test_session_start_hook_includes_primer(project_with_store):
+    """SessionStart MUST include the protocol primer so first-time agents discover EDP."""
+    result = _run_hook(project_with_store, event_name="SessionStart")
+    block = json.loads(result.stdout.strip())["hookSpecificOutput"]["additionalContext"]
+    assert "<edp:protocol>" in block
+    assert "edp_record" in block
+    assert "autonomous" in block
+
+
+def test_user_prompt_submit_hook_omits_primer(project_with_store):
+    """UserPromptSubmit (per-turn) MUST NOT include the primer — too costly to repeat."""
+    result = _run_hook(project_with_store, event_name="UserPromptSubmit")
+    block = json.loads(result.stdout.strip())["hookSpecificOutput"]["additionalContext"]
+    assert "<edp:protocol>" not in block
+    # But the snippet block is still present
+    assert "<edp:active" in block

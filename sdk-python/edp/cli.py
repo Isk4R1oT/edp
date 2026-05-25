@@ -160,6 +160,7 @@ def inject(
     version: int = typer.Option(1, "--version", help="Monotonic block version (see §4.2)"),
     tag: list[str] = typer.Option([], "--tag", help="Context tags to scope active block"),
     budget: int = typer.Option(2000, "--budget", help="Token budget for the block"),
+    primer: bool = typer.Option(False, "--primer", help="Prepend the EDP protocol primer (recommended for first-injection-per-session)"),
     store_path: Optional[str] = typer.Option(None, "--store"),
 ) -> None:
     """Print the <edp:active> block to stdout. Designed for harness hook subprocesses."""
@@ -171,6 +172,7 @@ def inject(
         version=version,
         context_tags=tag or None,
         policy=SelectorPolicy(token_budget=budget),
+        include_primer=primer,
     )
     sys.stdout.write(result.text)
     sys.stdout.write("\n")

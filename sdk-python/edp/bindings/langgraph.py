@@ -166,11 +166,24 @@ def inject_into_messages(
     version: int = 1,
     tags: Optional[list[str]] = None,
     policy: Optional[SelectorPolicy] = None,
+    primer: bool = False,
 ) -> list:
     """Lightweight alternative: prepend the active block to any message list.
 
     Useful when you do not want middleware semantics — just want to inject
     decisions into a one-shot prompt construction.
+
+    primer=True prepends the PROTOCOL_PRIMER inside the same SystemMessage so
+    an agent that has never used EDP discovers the four tools and autonomous
+    stance without a per-project CLAUDE.md. Recommended for the first call
+    in a session (the SessionStart equivalent); discouraged for every call
+    (waste of tokens).
     """
-    block = get_active_block(store, version=version, context_tags=tags, policy=policy)
+    block = get_active_block(
+        store,
+        version=version,
+        context_tags=tags,
+        policy=policy,
+        include_primer=primer,
+    )
     return [SystemMessage(content=block.text), *messages]
