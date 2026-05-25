@@ -16,7 +16,26 @@ the same MCP server (`edp-mcp-server` from the Python SDK).
 
 ---
 
-## Quick install (standalone, ~3 minutes)
+## Recommended install (v0.1.3+, 2 commands)
+
+```sh
+pip install explicit-decision-protocol
+cd /path/to/your/project
+edp claude-code install
+claude
+```
+
+`edp claude-code install` writes everything you need: `.edp/` store (via auto `edp init`), `.claude/settings.json` (with hooks pointing at `python -m edp.hook` — no path editing), `.claude/.mcp.json` (registers `edp-mcp-server`), and copies six `/edp-*` slash commands. Idempotent and supports `--force` and `--no-init`.
+
+To remove: `edp claude-code uninstall` — strips EDP entries from `.claude/`, **preserves `.edp/`**.
+
+Verify in a Claude Code session: `/edp-list` should print your decisions; *"What does the active EDP block say? Quote it verbatim."* should make the model echo your seeded snippet.
+
+---
+
+## Manual install (long form)
+
+Use this when you cannot run `edp claude-code install` (e.g., the `edp` CLI is not on PATH, or you want to inspect/customise every file before writing it).
 
 ### 1. Install the Python SDK
 
@@ -50,32 +69,16 @@ cp /path/to/edp/adapters/claude-code-plugin/standalone/commands/*.md .claude/com
 
 Then **edit the two `*.example` paths** to point at your actual checkout:
 
-- `settings.json`: replace `ABSOLUTE/PATH/TO/edp/...` with the real absolute path to `edp_hook.py`.
+- `settings.json`: replace `ABSOLUTE/PATH/TO/edp/...` with the real absolute path to `edp_hook.py`. (Since v0.1.3, the bundled hook lives inside the `edp` package; the standalone `edp_hook.py` is a thin shim for back-compat. The recommended modern command is `python3 -m edp.hook` — which `edp claude-code install` writes for you.)
 - `.mcp.json`: `EDP_STORE` defaults to `${PWD}/.edp` — usually fine; override if your store lives elsewhere.
 
-### 4. Start Claude Code in the project directory
+### 4. Start Claude Code
 
 ```sh
 claude
 ```
 
-On the first user turn, `edp_hook.py` runs as a `UserPromptSubmit` hook, calls `edp inject`, and prepends the active block (`<edp:active version="1">…`) to the conversation context. The MCP server is auto-started so the four tools are available.
-
-### 5. Verify
-
-In a Claude Code session, type:
-
-```
-/edp-list
-```
-
-If it prints your decisions, the MCP server is connected. Then try:
-
-```
-What does the active EDP block say? Quote it verbatim.
-```
-
-The model should quote your seeded `DEC-0001` snippet word-for-word. If it can't, the hook isn't injecting (see Troubleshooting).
+On the first turn, the hook fires, calls `edp inject`, and prepends the active block (`<edp:active version="1">…`) to the conversation context. The MCP server is auto-started so the four tools are available.
 
 ---
 

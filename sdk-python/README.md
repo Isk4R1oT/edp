@@ -87,25 +87,17 @@ Two runnable examples (auto-pick the model based on `OPENROUTER_API_KEY` / `OPEN
 
 ## Quick start — Claude Code
 
-The standalone hooks adapter wires up `SessionStart` (injects a protocol primer + active block) and `UserPromptSubmit` (injects active block per turn). Setup is ~3 minutes:
+Two commands (v0.1.3+):
 
 ```sh
 cd your-project
-edp init
-
-# Clone the EDP repo to get the adapter files (these are not on PyPI yet):
-git clone https://github.com/Isk4R1oT/edp.git ~/edp
-
-# Drop the standalone CC config into .claude/:
-mkdir -p .claude/commands
-cp ~/edp/adapters/claude-code-plugin/standalone/settings.json.example .claude/settings.json
-cp ~/edp/adapters/claude-code-plugin/standalone/.mcp.json.example .claude/.mcp.json
-cp ~/edp/adapters/claude-code-plugin/standalone/commands/*.md .claude/commands/
-
-# Edit .claude/settings.json — replace ABSOLUTE/PATH/TO/edp/... with $HOME/edp/...
-
-claude  # session starts; agent now sees the active block + primer
+edp claude-code install
+claude
 ```
+
+`edp claude-code install` auto-creates `.edp/`, writes `.claude/settings.json` (hooks → `python -m edp.hook`), `.claude/.mcp.json` (registers `edp-mcp-server`), and copies six `/edp-*` slash commands. Idempotent: re-running merges with your existing `.claude/` config instead of overwriting. To remove: `edp claude-code uninstall` (preserves `.edp/`).
+
+On `SessionStart` the agent sees a ~280-token protocol primer + the current `<edp:active>` block. On every `UserPromptSubmit` it sees the active block again (primer omitted). The four EDP tools (`edp_record`, `edp_show`, `edp_check`, `edp_supersede`) are exposed via the bundled MCP server; slash commands give a manual escape hatch.
 
 Full Claude Code install matrix, MCP-client variants (Cursor, Cline, Continue, Claude Desktop), and the LangGraph adapter docs are in the [main repo](https://github.com/Isk4R1oT/edp#quick-install).
 

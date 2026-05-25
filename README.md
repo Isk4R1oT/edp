@@ -197,27 +197,21 @@ edp list --active
 edp inject --version 1                                  # prints the <edp:active> block
 ```
 
-### Claude Code in 60 seconds
-
-The adapter files are not on PyPI yet (Sprint 2 ships them as a `.claude/` config drop-in; plugin-manifest form blocked on [claude-code#16538](https://github.com/anthropics/claude-code/issues/16538)). Clone the repo, drop the four files in:
+### Claude Code in 2 commands
 
 ```sh
-git clone https://github.com/Isk4R1oT/edp.git ~/edp
-
-cd your-project
-edp init                                                # create .edp/ if you haven't
-
-mkdir -p .claude/commands
-cp ~/edp/adapters/claude-code-plugin/standalone/settings.json.example .claude/settings.json
-cp ~/edp/adapters/claude-code-plugin/standalone/.mcp.json.example .claude/.mcp.json
-cp ~/edp/adapters/claude-code-plugin/standalone/commands/*.md .claude/commands/
-
-# Edit .claude/settings.json — replace ABSOLUTE/PATH/TO/edp/... with $HOME/edp/...
-
+pip install explicit-decision-protocol
+edp claude-code install
 claude                                                  # session starts
 ```
 
+That's the whole setup. `edp claude-code install` (added in v0.1.3) auto-creates `.edp/`, writes `.claude/settings.json` (with hooks pointing at `python -m edp.hook`), `.claude/.mcp.json` (registers the bundled `edp-mcp-server`), and copies the six `/edp-*` slash commands. No path editing, no clones.
+
 On `SessionStart` the agent sees the protocol primer + the active block. On every `UserPromptSubmit` it sees the active block again (without the primer). The four EDP tools (`edp_record`, `edp_show`, `edp_check`, `edp_supersede`) are auto-registered via the bundled MCP server. Six slash commands (`/edp-record`, `/edp-show`, `/edp-check`, `/edp-supersede`, `/edp-list`, `/edp-events`) give you a manual escape hatch.
+
+To remove later: `edp claude-code uninstall` — strips the EDP hooks, MCP entry, and slash commands; **does not** delete `.edp/` (your decisions are preserved).
+
+For the long-form install (manual file drop, useful when you cannot install Python packages globally), see [`adapters/claude-code-plugin/README.md`](adapters/claude-code-plugin/README.md).
 
 ### Other harnesses
 

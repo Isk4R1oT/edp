@@ -8,37 +8,66 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 
 ## [Unreleased]
 
-(Documentation polish and the first PyPI publish — see v0.1.2 below for
-the SDK feature state at that point.)
+## [0.1.3] — 2026-05-25
 
 ### Added
 
-- `docs/dogfood-tinycache.md` — public sanitized trace of a two-session
-  blank-slate trial on Opus 4.7. Cited from `README.md` and
-  `docs/evidence.md` (new §5 "Own dogfood findings").
-- `README.md` — new "Does it actually work?" section between the snippet
-  block and "Why a protocol, not a library". Distinguishes first-party
-  dogfood findings from third-party citations.
-- `README.md` — "Claude Code in 60 seconds" subsection in Quick install
-  with real, copy-pasteable setup commands.
-- `docs/evidence.md` — new §5 "Own dogfood findings" with three buckets
-  (blank-slate trial, naturalistic test, explicit integration test) and
-  an explicit list of what has NOT yet been measured.
-- `EXAMPLE.md` — now a walkthrough of the real tinycache dogfood trial
-  (decision bodies verbatim from the store; snippet blocks rendered
-  illustratively) rather than a synthetic enterprise example.
-- `sdk-python/README.md` — completely rewritten (was stale "scaffolding"
-  placeholder); now reflects the implemented SDK and becomes the PyPI
-  package description.
+- **`edp claude-code install` CLI subcommand** — installs the EDP hook +
+  MCP server registration + six `/edp-*` slash commands into a project's
+  `.claude/` directory in a single command. Auto-creates `.edp/` if
+  missing, uses `sys.executable` so the generated `settings.json` points
+  at the right Python interpreter without manual path editing, merges
+  with existing `.claude/settings.json` instead of overwriting, and is
+  idempotent on re-run (flags: `--force` to overwrite EDP entries,
+  `--no-init` to skip the auto `edp init`, `--target` to point at a
+  non-default `.claude/`).
+- **`edp claude-code uninstall` CLI subcommand** — symmetric removal:
+  strips EDP hook entries from `settings.json`, removes the `edp` MCP
+  server entry, deletes `/edp-*` slash commands. Leaves user-owned
+  hooks/MCP servers/slash commands intact. **Does not** delete `.edp/`
+  — your decisions are preserved.
+- **`edp.hook` module** — the Claude Code hook is now an importable
+  package module invokable via `python -m edp.hook SessionStart`. This
+  removes the need to reference an absolute filesystem path in
+  `.claude/settings.json` (workaround for the still-open
+  [claude-code#4276 / #46889](https://github.com/anthropics/claude-code/issues/46889)
+  env-var-substitution gap).
+- **Slash commands packaged as `edp/commands/*.md`** — the six
+  `/edp-record`, `/edp-show`, `/edp-check`, `/edp-supersede`,
+  `/edp-list`, `/edp-events` markdown files ship inside the wheel and
+  are copied to `.claude/commands/` by `edp claude-code install` via
+  `importlib.resources`.
+- 12 new unit tests in `sdk-python/tests/test_claude_code_install.py`
+  covering fresh install, settings format, MCP entry shape, idempotency,
+  merge-with-unrelated-hooks, `--no-init`, `--force` overwrite, invalid
+  JSON refusal, uninstall surgical removal, uninstall preserves the
+  store, and uninstall on a clean project being a no-op.
 
 ### Changed
 
-- `README.md` Status & roadmap — refreshed test counts (48 unit tests,
-  9 hook tests including primer auto-inject) and added v0.1.1 / v0.1.2
-  milestones as completed.
-- `sdk-python/pyproject.toml` version bumped `0.1.0a0 → 0.1.2` so the
-  PyPI release reflects the actual SDK state (revision_conditions field
-  + primer + LangChain 1.1 middleware fix all shipped).
+- `adapters/claude-code-plugin/standalone/hooks/edp_hook.py` is now a
+  thin back-compat shim that delegates to `edp.hook.main()`. Existing
+  `.claude/settings.json` files that reference its absolute path keep
+  working.
+- README.md "Claude Code in 60 seconds" → **"Claude Code in 2 commands"**
+  with the new install command flow.
+- `adapters/claude-code-plugin/README.md` reorganised: the
+  `edp claude-code install` path is now primary; the previous "drop the
+  four files into `.claude/`" workflow is preserved as a "Manual install
+  (long form)" section for users who cannot install Python packages
+  globally.
+- `sdk-python/README.md` Claude Code section rewritten around the new
+  2-command flow.
+
+### Why
+
+Friction points caught when documenting the install UX: the previous
+flow required (1) `git clone` for adapter files, (2) editing an absolute
+path in `settings.json`, (3) waiting on plugin-form distribution that is
+blocked upstream on the still-broken
+[claude-code#16538](https://github.com/anthropics/claude-code/issues/16538)
+(closed by bot in May 2026 for inactivity but never actually fixed).
+v0.1.3 eliminates all three.
 
 ## [0.1.2] — 2026-05-25
 
