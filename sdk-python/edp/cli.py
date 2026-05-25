@@ -350,12 +350,14 @@ def claude_code_install(
         "--enable-verifier",
         help=(
             "Install the advisory pre-flight verifier hook (spec §3.6 v0.2). "
-            "Requires 'pip install explicit-decision-protocol[verifier]' + "
-            "ANTHROPIC_API_KEY. Fails open by default (set EDP_VERIFIER_REQUIRED=1 "
-            "to fail closed). WARNING: each verified tool call sends the planned-"
-            "action summary + all active decision invariants to Anthropic's API. "
-            "Do NOT enable on projects with confidential architecture without "
-            "explicit operator consent."
+            "Requires 'pip install explicit-decision-protocol[verifier]'. Auth "
+            "inherits from the `claude` CLI (subscription OR ANTHROPIC_API_KEY) "
+            "— no separate key needed if you are logged into Claude Code. Fails "
+            "open by default (set EDP_VERIFIER_REQUIRED=1 to fail closed). "
+            "WARNING: each verified tool call sends the planned-action summary "
+            "+ all active decision invariants to Anthropic's API. Do NOT enable "
+            "on projects with confidential architecture without explicit operator "
+            "consent."
         ),
     ),
 ) -> None:
@@ -492,11 +494,12 @@ def claude_code_install(
         )
         typer.echo("  - Matches Edit | Write | Bash | str_replace_editor")
         typer.echo("  - Requires `pip install explicit-decision-protocol[verifier]`")
-        typer.echo("  - Requires ANTHROPIC_API_KEY in env")
+        typer.echo("  - Auth: inherits from `claude` CLI (subscription OR ANTHROPIC_API_KEY)")
+        typer.echo("    — no separate key needed if you are logged into Claude Code")
         typer.echo("  - Fail-open by default; set EDP_VERIFIER_REQUIRED=1 to fail closed")
         typer.echo("  - Verifier runs only when at least one active decision has invariants")
         typer.echo(
-            f"  - Model: ${{EDP_VERIFIER_MODEL:-{('claude-haiku-4-5-20251001')}}}"
+            f"  - Model: ${{EDP_VERIFIER_MODEL:-{('claude-haiku-4-5')}}}"
         )
         typer.echo()
         typer.secho(

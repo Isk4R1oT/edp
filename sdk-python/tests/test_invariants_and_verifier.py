@@ -258,8 +258,12 @@ def test_verifier_hook_allows_when_no_invariants(tmp_path):
     assert "no active invariants" in out["permissionDecisionReason"].lower()
 
 
-def test_verifier_hook_fail_open_when_anthropic_missing(tmp_path, monkeypatch):
-    """If invariants exist but anthropic SDK is missing, hook fails open with a warning (default)."""
+def test_verifier_hook_fail_open_when_disabled(tmp_path):
+    """If invariants exist but verifier is disabled, hook fails open with a warning (default).
+
+    Uses EDP_VERIFIER_DISABLE=1 to force VerifierUnavailable without depending
+    on the test env having or not having claude_agent_sdk / claude CLI.
+    """
     from edp import DecisionStore
 
     DecisionStore.open(tmp_path / ".edp").record(
@@ -273,8 +277,7 @@ def test_verifier_hook_fail_open_when_anthropic_missing(tmp_path, monkeypatch):
         json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "x"}}),
         env_extra={
             "EDP_STORE": str(tmp_path / ".edp"),
-            # Force VerifierUnavailable by unsetting key + no anthropic install in CI
-            "ANTHROPIC_API_KEY": "",
+            "EDP_VERIFIER_DISABLE": "1",
         },
     )
     payload = json.loads(result.stdout.strip())
@@ -284,7 +287,11 @@ def test_verifier_hook_fail_open_when_anthropic_missing(tmp_path, monkeypatch):
 
 
 def test_verifier_hook_fail_closed_when_required_env_set(tmp_path):
-    """With EDP_VERIFIER_REQUIRED=1, missing verifier dependency BLOCKS the action."""
+    """With EDP_VERIFIER_REQUIRED=1, missing verifier dependency BLOCKS the action.
+
+    Combines with EDP_VERIFIER_DISABLE=1 to deterministically trigger the
+    "verifier unavailable" path regardless of test-env claude_agent_sdk presence.
+    """
     from edp import DecisionStore
 
     DecisionStore.open(tmp_path / ".edp").record(
@@ -298,7 +305,7 @@ def test_verifier_hook_fail_closed_when_required_env_set(tmp_path):
         json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "x"}}),
         env_extra={
             "EDP_STORE": str(tmp_path / ".edp"),
-            "ANTHROPIC_API_KEY": "",
+            "EDP_VERIFIER_DISABLE": "1",
             "EDP_VERIFIER_REQUIRED": "1",
         },
     )
@@ -430,94 +437,80 @@ def test_verifier_wraps_invariants_in_untrusted_tags(tmp_store):
     assert "ignore previous instructions" in text
 
 
-def test_verifier_returns_uncertain_when_anthropic_missing(monkeypatch):
-    """P1-3: with no anthropic SDK, verify() raises VerifierUnavailable cleanly."""
+def test_verifier_raises_unavailable_when_sdk_missing(monkeypatch):
+    """v0.2: without claude_agent_sdk, verify() raises VerifierUnavailable cleanly.
+
+    Auth path changed in v0.2 from anthropic SDK (required ANTHROPIC_API_KEY) to
+    claude_agent_sdk (inherits subscription auth from `claude` CLI). The
+    "missing dep" failure is now keyed off claude_agent_sdk.
+    """
     import sys
 
     from edp.verifier import VerifierUnavailable, verify
 
-    # Force ImportError on `import anthropic` inside verify()
-    monkeypatch.setitem(sys.modules, "anthropic", None)
-    with pytest.raises(VerifierUnavailable, match="anthropic SDK not installed"):
+    # Force ImportError on `from claude_agent_sdk import ...` inside _verify_async
+    monkeypatch.setitem(sys.modules, "claude_agent_sdk", None)
+    with pytest.raises(VerifierUnavailable, match="claude_agent_sdk not installed"):
         verify("any action", [])
 
 
-def test_verifier_raises_when_api_key_missing(monkeypatch):
-    """P1-3: without ANTHROPIC_API_KEY, verify() raises VerifierUnavailable."""
-    pytest.importorskip("anthropic")
+def test_verifier_parses_json_response_compatible():
+    """v0.2: verifier response is a JSON line; parse correctly when verdict='compatible'."""
+    from edp.verifier import _parse_verifier_json
 
-    from edp.verifier import VerifierUnavailable, verify
+    r = _parse_verifier_json(
+        '{"verdict": "compatible", "reasoning": "no relevant invariants", "violated_decision_ids": []}'
+    )
+    assert r.verdict == "compatible"
+    assert r.violated_decision_ids == []
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    with pytest.raises(VerifierUnavailable, match="ANTHROPIC_API_KEY not set"):
-        verify("any action", [])
+
+def test_verifier_parses_json_response_violated():
+    from edp.verifier import _parse_verifier_json
+
+    r = _parse_verifier_json(
+        '{"verdict": "violated", "reasoning": "DEC-0001 invariant violated", "violated_decision_ids": ["DEC-0001"]}'
+    )
+    assert r.verdict == "violated"
+    assert r.violated_decision_ids == ["DEC-0001"]
 
 
-def test_verifier_happy_path_with_mocked_client(monkeypatch):
-    """P1-3 gap: round-trip verify() with a mocked Anthropic client.
+def test_verifier_strips_markdown_fences():
+    """Model sometimes wraps JSON in ```json … ``` despite being told not to."""
+    from edp.verifier import _parse_verifier_json
 
-    Three sub-checks:
-      1. tool_use → compatible verdict round-trips
-      2. tool_use → violated verdict carries decision ids
-      3. response with no tool_use → uncertain fallback
-    """
-    anthropic = pytest.importorskip("anthropic")
+    r = _parse_verifier_json(
+        '```json\n{"verdict": "uncertain", "reasoning": "ambiguous", "violated_decision_ids": []}\n```'
+    )
+    assert r.verdict == "uncertain"
 
-    from unittest.mock import MagicMock, patch
 
-    from edp.verifier import verify
+def test_verifier_returns_uncertain_on_garbage_response():
+    """Defensive: unparseable response → uncertain (fail-open advisory)."""
+    from edp.verifier import _parse_verifier_json
 
-    def _make_tool_use_block(name: str, payload: dict):
-        b = MagicMock()
-        b.type = "tool_use"
-        b.name = name
-        b.input = payload
-        return b
+    r = _parse_verifier_json("I refused to answer.")
+    assert r.verdict == "uncertain"
+    assert "not parseable" in r.reasoning or "JSON parse error" in r.reasoning
 
-    def _make_text_block(text: str):
-        b = MagicMock()
-        b.type = "text"
-        b.text = text
-        return b
 
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-fake")
+def test_verifier_returns_uncertain_on_empty_response():
+    from edp.verifier import _parse_verifier_json
 
-    # (1) compatible
-    fake_response = MagicMock()
-    fake_response.content = [_make_tool_use_block("report_compatibility", {
-        "verdict": "compatible",
-        "reasoning": "no relevant invariants",
-        "violated_decision_ids": [],
-    })]
-    with patch.object(anthropic, "Anthropic") as MockClient:
-        MockClient.return_value.messages.create.return_value = fake_response
-        r = verify("Read a file", [])
-        assert r.verdict == "compatible"
+    r = _parse_verifier_json("")
+    assert r.verdict == "uncertain"
 
-    # (2) violated
-    fake_response2 = MagicMock()
-    fake_response2.content = [_make_tool_use_block("report_compatibility", {
-        "verdict": "violated",
-        "reasoning": "DEC-0001 invariant violated",
-        "violated_decision_ids": ["DEC-0001"],
-    })]
-    with patch.object(anthropic, "Anthropic") as MockClient:
-        MockClient.return_value.messages.create.return_value = fake_response2
-        r = verify("Add XML serializer", [])
-        assert r.verdict == "violated"
-        assert r.violated_decision_ids == ["DEC-0001"]
 
-    # (3) no tool_use → uncertain fallback
-    fake_response3 = MagicMock()
-    fake_response3.content = [_make_text_block("I refused to use the tool")]
-    with patch.object(anthropic, "Anthropic") as MockClient:
-        MockClient.return_value.messages.create.return_value = fake_response3
-        r = verify("Do something", [])
-        assert r.verdict == "uncertain"
+def test_verifier_returns_uncertain_on_malformed_json():
+    """JSON-shaped but wrong fields → uncertain."""
+    from edp.verifier import _parse_verifier_json
+
+    r = _parse_verifier_json('{"verdict": "not-a-valid-verdict", "reasoning": "x", "violated_decision_ids": []}')
+    assert r.verdict == "uncertain"
 
 
 def test_verifier_transient_error_subclass_of_unavailable():
-    """P1-2: transient errors are catchable as VerifierUnavailable (back-compat)."""
+    """Transient errors are catchable as VerifierUnavailable (back-compat)."""
     from edp.verifier import VerifierTransientError, VerifierUnavailable
 
     assert issubclass(VerifierTransientError, VerifierUnavailable)

@@ -42,9 +42,12 @@ pydantic-ai = [
 ]
 verifier = [
   # Pre-action verifier (spec §3.6 v0.2 extension) — calls Haiku-class model
-  # to check planned tool calls against active invariants. Optional install:
-  # `pip install explicit-decision-protocol[verifier]`.
-  "anthropic>=0.40,<1.0",
+  # to check planned tool calls against active invariants. Uses the
+  # claude_agent_sdk so auth flows through `claude` CLI subscription OR
+  # ANTHROPIC_API_KEY (same path the main Claude Code agent uses) — no
+  # separate API-key requirement when the user is logged into Claude Code.
+  # Optional install: `pip install explicit-decision-protocol[verifier]`.
+  "claude-agent-sdk>=0.2,<1.0",
 ]
 
 [project.scripts]
