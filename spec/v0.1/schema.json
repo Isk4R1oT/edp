@@ -88,6 +88,14 @@
       },
       "description": "Human-readable constraints surfaced in the snippet block. Not assertable in v0.1."
     },
+    "revision_conditions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "maxLength": 200
+      },
+      "description": "Event-based re-examination triggers (natural language). Different from review_due_at_step (time-based). Surfaced via 'triggers:N' marker in snippet; full text in body."
+    },
     "context": {
       "type": "string",
       "description": "What facts and state led to the decision (markdown)"

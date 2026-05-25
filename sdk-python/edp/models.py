@@ -51,6 +51,7 @@ class Decision(BaseModel):
     superseded_by: Optional[str] = None
     review_due_at_step: Optional[int] = Field(default=None, ge=0)
     key_constraints: list[str] = Field(default_factory=list)
+    revision_conditions: list[str] = Field(default_factory=list)
     context: Optional[str] = None
     alternatives: list[Alternative] = Field(default_factory=list)
     consequences: list[str] = Field(default_factory=list)
@@ -72,6 +73,14 @@ class Decision(BaseModel):
         for kc in v:
             if len(kc) > 140:
                 raise ValueError(f"key_constraint exceeds 140 chars: {kc[:30]}...")
+        return v
+
+    @field_validator("revision_conditions")
+    @classmethod
+    def _validate_revision_conditions(cls, v: list[str]) -> list[str]:
+        for rc in v:
+            if len(rc) > 200:
+                raise ValueError(f"revision_condition exceeds 200 chars: {rc[:30]}...")
         return v
 
     def model_dump_storage(self) -> str:

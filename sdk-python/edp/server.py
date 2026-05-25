@@ -91,16 +91,27 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         evidence: list[str],
         confidence: float = 0.7,
         tags: Optional[list[str]] = None,
+        revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
-        provisional: bool = True,
+        provisional: bool = False,
     ) -> str:
         """Record a new EDP decision; returns the assigned DEC-NNNN id.
 
-        Decisions you author should normally be marked provisional=True so a
-        human can confirm before the decision becomes binding on future work.
-        Use the decision-worthiness criteria from spec §3.7 — record only when
-        a commitment has multi-turn consequence, is constraint-shaped, hard
-        to re-derive, or has reversibility implications.
+        EDP is your own working memory of architectural commitments. When you
+        decide a non-trivial direction, record it — your future-self should
+        treat your past commitments as binding. Use decision-worthiness criteria
+        from spec §3.7 (multi-turn consequence, constraint-shaped, hard to
+        re-derive, reversibility-relevant — at least two must hold).
+
+        provisional=False is the default: you are committing. Set provisional=True
+        ONLY when (a) your confidence is below ~0.5 AND (b) you cannot supersede
+        an existing decision instead. A provisional record is visible in the
+        active block with a [provisional] marker so a reader can see uncertainty.
+
+        revision_conditions are event-based re-examination triggers — natural
+        language descriptions of what would invalidate this decision. Different
+        from review_due_at_step (which is time-based decay). Use when the answer
+        depends on observable state, not the calendar.
 
         Example:
             edp_record(
@@ -115,6 +126,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            revision_conditions=revision_conditions or [],
             evidence=evidence,
             confidence=confidence,
             tags=tags or [],
@@ -131,6 +143,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         key_constraints: list[str],
         evidence: list[str],
         confidence: float = 0.7,
+        revision_conditions: Optional[list[str]] = None,
         review_due_at_step: Optional[int] = None,
     ) -> str:
         """Replace an existing EDP decision with a new one; archives the old, preserves the chain.
@@ -157,6 +170,7 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            revision_conditions=revision_conditions or [],
             evidence=evidence,
             confidence=confidence,
             review_due_at_step=review_due_at_step,

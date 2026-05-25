@@ -213,6 +213,7 @@ class DecisionStore:
         tags: Optional[list[str]] = None,
         confidence: Optional[float] = None,
         key_constraints: Optional[list[str]] = None,
+        revision_conditions: Optional[list[str]] = None,
         context: Optional[str] = None,
         consequences: Optional[list[str]] = None,
         alternatives: Optional[list[dict]] = None,
@@ -246,6 +247,7 @@ class DecisionStore:
                 tags=tags or [],
                 confidence=confidence,
                 key_constraints=key_constraints or [],
+                revision_conditions=revision_conditions or [],
                 context=context,
                 consequences=consequences or [],
                 alternatives=[
@@ -273,6 +275,7 @@ class DecisionStore:
         tags: Optional[list[str]] = None,
         confidence: Optional[float] = None,
         key_constraints: Optional[list[str]] = None,
+        revision_conditions: Optional[list[str]] = None,
         context: Optional[str] = None,
         consequences: Optional[list[str]] = None,
         alternatives: Optional[list[dict]] = None,
@@ -306,6 +309,7 @@ class DecisionStore:
                 confidence=confidence,
                 supersedes=old_id,
                 key_constraints=key_constraints or [],
+                revision_conditions=revision_conditions or [],
                 context=context,
                 consequences=consequences or [],
                 alternatives=[

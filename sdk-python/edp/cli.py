@@ -49,6 +49,9 @@ def record(
     constraint: list[str] = typer.Option(
         [], "--constraint", help="Key constraint (repeatable, ≤140 chars each)"
     ),
+    trigger: list[str] = typer.Option(
+        [], "--trigger", help="Revision condition (event-based; repeatable, ≤200 chars each)"
+    ),
     evidence: list[str] = typer.Option(
         [], "--evidence", help="Stable index handle (repeatable)"
     ),
@@ -65,6 +68,7 @@ def record(
         title=title,
         decision=decision,
         key_constraints=constraint,
+        revision_conditions=trigger,
         evidence=evidence,
         tags=tag,
         confidence=confidence,
@@ -83,6 +87,7 @@ def supersede(
     title: str = typer.Option(..., "--title"),
     decision: str = typer.Option(..., "--decision"),
     constraint: list[str] = typer.Option([], "--constraint"),
+    trigger: list[str] = typer.Option([], "--trigger", help="Revision condition (event-based)"),
     evidence: list[str] = typer.Option([], "--evidence"),
     confidence: float = typer.Option(0.7, "--confidence", min=0.0, max=1.0),
     step: int = typer.Option(0, "--step"),
@@ -96,6 +101,7 @@ def supersede(
         title=title,
         decision=decision,
         key_constraints=constraint,
+        revision_conditions=trigger,
         evidence=evidence,
         confidence=confidence,
         actor=_actor(),

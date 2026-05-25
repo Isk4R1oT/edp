@@ -45,6 +45,26 @@ def test_snippet_provisional_marker():
     assert "provisional" in snip
 
 
+def test_snippet_triggers_marker_when_revision_conditions_present():
+    d = _dec(revision_conditions=["trigger-A", "trigger-B"])
+    snip = render_snippet(d)
+    assert "triggers:2" in snip
+
+
+def test_snippet_no_triggers_marker_when_empty():
+    d = _dec(revision_conditions=[])
+    snip = render_snippet(d)
+    assert "triggers:" not in snip
+
+
+def test_full_markdown_includes_revision_conditions_section():
+    d = _dec(revision_conditions=["pgvector p95 > 50ms", "ANN recall < 0.9"])
+    md = render_full_markdown(d)
+    assert "## Revision conditions" in md
+    assert "pgvector p95 > 50ms" in md
+    assert "ANN recall < 0.9" in md
+
+
 def test_wrap_active_block_includes_precedence():
     text = wrap_active_block(["DEC-0001 [active]\n  Title: x"], version=3, total_active=1)
     assert '<edp:active version="3">' in text

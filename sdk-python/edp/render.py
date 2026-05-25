@@ -21,6 +21,8 @@ def render_snippet(dec: Decision, *, max_constraints: int = 3) -> str:
         parts.append(f"conf={dec.confidence:.2g}")
     if dec.review_due_at_step is not None:
         parts.append(f"due=step:{dec.review_due_at_step}")
+    if dec.revision_conditions:
+        parts.append(f"triggers:{len(dec.revision_conditions)}")
     if dec.superseded_by is not None:
         parts.append(f"→ see {dec.superseded_by}")
     if dec.provisional:
@@ -110,6 +112,13 @@ def render_full_markdown(dec: Decision) -> str:
         lines.append("")
         for kc in dec.key_constraints:
             lines.append(f"- {kc}")
+        lines.append("")
+
+    if dec.revision_conditions:
+        lines.append("## Revision conditions")
+        lines.append("")
+        for rc in dec.revision_conditions:
+            lines.append(f"- {rc}")
         lines.append("")
 
     if dec.consequences:

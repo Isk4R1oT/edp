@@ -65,7 +65,7 @@ The full evidence arsenal — 22 citations across academic findings, GitHub issu
 - **CLAUDE.md / .cursorrules / .clinerules** are static prefixes. Compaction silently invalidates them ([claude-code#19471](https://github.com/anthropics/claude-code/issues/19471)). New decisions made mid-session never appear there.
 - **Runtime guardrails** (AgentSpec, Invariant Labs, NeMo) verify actions against rules at execution time. Useful, but a different problem. They prevent action; they do not give the agent its own working memory of what was decided.
 
-EDP is not any of the above. It is a small protocol focused on one mechanism: **decisions as inspectable artifacts in the agent loop**.
+EDP is not any of the above. It is a small protocol focused on one mechanism: **decisions as inspectable artifacts in the agent loop** — the agent's own external working memory of its commitments. The human is a reviewer of the log, not a gate on the writes.
 
 ---
 

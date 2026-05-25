@@ -50,8 +50,9 @@ A decision is a single immutable record with these fields.
 | `confidence` | number, 0.0–1.0 | Calibrated confidence at write time. See §3.4 |
 | `supersedes` | string, `DEC-NNNN` or null | Previous decision this one replaces |
 | `superseded_by` | string, `DEC-NNNN` or null | Set on the previous record when this one supersedes it |
-| `review_due_at_step` | integer or null | Step at which this decision should be re-confirmed. See §3.5 |
+| `review_due_at_step` | integer or null | Step at which this decision should be re-confirmed (time-based). See §3.5 |
 | `key_constraints` | array of string, each ≤140 chars | Human-readable constraints surfaced in the snippet block. See §3.6 |
+| `revision_conditions` | array of string, each ≤200 chars | Event-based re-examination triggers (natural language). See §3.8 |
 | `context` | string (markdown) | What facts and state led to the decision |
 | `alternatives` | array of objects `{label, rejected_because}` | What was considered and rejected |
 | `consequences` | array of string | What this decision enables / closes / risks |
@@ -100,22 +101,43 @@ EDP v0.1 deliberately renames this field to **`key_constraints`** and relaxes th
 
 Runtime invariant assertion (with a verifier gating tool calls) is a known follow-on extension. It is deferred from v0.1 because (a) gating introduces a measured verifier tax on long-horizon success (see [arXiv:2603.19328](https://arxiv.org/abs/2603.19328)) and (b) the visibility primitive — making decisions present in the agent's working context — is the load-bearing intervention that should land first.
 
-### 3.7 Decision-worthiness — what should be recorded
+### 3.7 Decision-worthiness — what the agent should record
 
-EDP is not a logbook. Recording every micro-choice as a decision floods the active block, drowns out the signal, and trains the agent to ignore it. Recording nothing produces the silent drift EDP exists to prevent.
+EDP is the agent's own working memory of architectural commitments. The agent records when it commits to a non-trivial direction that should bind its own future work. The human is a reviewer of the log, not a gate on the writes — `provisional` is the corner case (see §5.3), not the norm.
 
-A record SHOULD be created when at least two of the following are true:
+Recording every micro-choice floods the active block and trains the agent to ignore it. Recording nothing produces the silent drift EDP exists to prevent. The agent SHOULD record when at least two of the following hold:
 
 1. **Multi-turn consequence.** The choice constrains work that will happen in subsequent turns or sessions. Not a one-shot action.
 2. **Constraint-shaped.** The choice can be summarised as one or more `key_constraints` of ≤140 chars that future actions can be checked against (via `check()`).
 3. **Hard to re-derive.** The rationale depends on context that will be expensive to reconstruct later (user-stated preference, research finding, performance data).
 4. **Reversibility-relevant.** The cost of acting against this choice later is non-trivial — it requires rework, undoes user trust, or has external side effects.
 
-A record SHOULD NOT be created for: variable names, single-file refactors, ad-hoc clarifications, parameters of a single function call, or anything that would not change behaviour two turns later.
+The agent SHOULD NOT record: variable names, single-file refactors, ad-hoc clarifications, parameters of a single function call, or anything that would not change behaviour two turns later.
 
-When in doubt, ask: *"Will another agent / future-me, three days from now, regret not seeing this decision?"* If yes, record. If unsure, lean toward not recording — under-recording is recoverable (record it later when it becomes relevant); over-recording is corrosive (the active block becomes noise).
+When in doubt, the agent asks: *"Will my future-self three days from now regret not seeing this commitment?"* If yes, record. If unsure, lean toward not recording — under-recording is recoverable (record it later when it becomes relevant); over-recording is corrosive (the active block becomes noise).
 
 Implementations MAY enforce a soft heuristic — e.g. warn if `key_constraints` is empty, prompt for confirmation if `decision` is shorter than 80 characters — but MUST NOT block valid records.
+
+### 3.8 `revision_conditions` — event-based re-examination triggers
+
+`review_due_at_step` (§3.5) handles time-based decay: *"after 100 steps, re-confirm"*. But most decisions do not decay on a clock — they decay when **something happens in the world**: a measurement crosses a threshold, a user expresses an opposite preference, evidence emerges that contradicts the rationale, a downstream system fails the way the decision was supposed to prevent.
+
+`revision_conditions` captures these. Each entry is a natural-language description of an event, state-change, or finding that would invalidate the decision. The selector and the agent treat these as **re-examination triggers**, not assertable predicates — same relaxation as `key_constraints` (§3.6).
+
+Examples (from a real decision):
+
+```yaml
+revision_conditions:
+  - "pgvector query latency exceeds 50ms p95 on the top-3 collections"
+  - "ANN recall drops below 0.9 vs Pinecone baseline on the holdout set"
+  - "team adds a >1B-vector collection that pgvector cannot host"
+```
+
+When `revision_conditions` is non-empty, the snippet block carries a `triggers:N` marker in the header line so the reader knows the decision has event-based triggers (the full text is in the body, retrieved via `show()` — slot in the snippet block is too small).
+
+A `revisit(event_description)` tool that actively scans triggers for relevance is a candidate v0.2 addition. v0.1 exposes the data; v0.2 will add the agent-facing scan helper. Until then the agent reads triggers when calling `show()` and decides whether anything observed since the last review matches.
+
+The distinction matters: `review_due_at_step` is **passive** (timer fires regardless of state); `revision_conditions` is **active** (state changes fire regardless of timer). A well-formed decision usually has both — one as a backstop, the other as the live signal.
 
 ---
 
@@ -218,7 +240,7 @@ record({
 → "DEC-0051"
 ```
 
-Agents SHOULD set `confidence` honestly. Decisions written by agents (not humans) MAY be marked `provisional: true` and excluded from the active block by the selector until a human confirms.
+Agents SHOULD set `confidence` honestly and **commit `provisional=False` by default**. EDP is the agent's working memory — its own past commitments must bind its future work, otherwise the protocol's core value is lost. `provisional=True` is a corner case: use it ONLY when (a) self-assessed confidence is below ~0.5 AND (b) superseding an existing decision is not the right move. A `[provisional]` marker stays visible in the snippet so a human reviewer can see uncertainty; the selector still includes provisional records in the active block (per §11) unless per-project config opts them out.
 
 ### 5.4 `supersede(old_id, new_record) -> new_id`
 

@@ -107,6 +107,57 @@ def test_provisional_filter(tmp_store):
     assert {d.id for d in included} == {"DEC-0001", "DEC-0002"}
 
 
+def test_revision_conditions_roundtrip(tmp_store):
+    """revision_conditions persist through record+show and are visible in full body."""
+    triggers = [
+        "pgvector latency p95 > 50ms on top-3 collections",
+        "user explicitly opts in to XML for any new endpoint",
+    ]
+    dec_id = _record(
+        tmp_store,
+        title="JSON-only API",
+        revision_conditions=triggers,
+    )
+    dec = tmp_store.show(dec_id)
+    assert dec.revision_conditions == triggers
+
+
+def test_revision_conditions_validation(tmp_store):
+    """Each revision_condition entry must be ≤ 200 chars."""
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        _record(
+            tmp_store,
+            title="too long",
+            revision_conditions=["x" * 201],
+        )
+
+
+def test_revision_conditions_default_empty(tmp_store):
+    """When not provided, revision_conditions is an empty list (not None)."""
+    dec_id = _record(tmp_store, title="no triggers")
+    dec = tmp_store.show(dec_id)
+    assert dec.revision_conditions == []
+
+
+def test_revision_conditions_supersede_carry(tmp_store):
+    """supersede() accepts revision_conditions for the new record independently of old."""
+    old = _record(tmp_store, title="old", revision_conditions=["old trigger"])
+    new = tmp_store.supersede(
+        old,
+        title="new",
+        decision="d",
+        key_constraints=[],
+        evidence=[],
+        revision_conditions=["new trigger A", "new trigger B"],
+    )
+    new_dec = tmp_store.show(new)
+    assert new_dec.revision_conditions == ["new trigger A", "new trigger B"]
+    # Old record retains its original triggers
+    old_dec = tmp_store.show(old)
+    assert old_dec.revision_conditions == ["old trigger"]
+
+
 def test_pragmas_applied(tmp_store):
     """Ensure spec §7.4 pragmas are actually set on connections."""
     conn = tmp_store._connect()

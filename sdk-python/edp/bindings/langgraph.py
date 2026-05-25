@@ -54,17 +54,23 @@ def edp_tools(store: DecisionStore) -> list[Any]:
         evidence: list[str],
         confidence: float = 0.7,
         tags: Optional[list[str]] = None,
-        provisional: bool = True,
+        revision_conditions: Optional[list[str]] = None,
+        provisional: bool = False,
     ) -> str:
         """Record a new EDP decision; returns the assigned DEC-NNNN id.
 
-        Mark provisional=True (default) so a human can confirm before the
-        decision becomes binding on future work.
+        EDP is your own working memory of architectural commitments. provisional
+        defaults to False — you are committing. Set provisional=True ONLY when
+        your confidence is below ~0.5 AND you cannot supersede instead.
+
+        revision_conditions are event-based re-examination triggers (natural
+        language); different from review_due_at_step which is time-based.
         """
         return store.record(
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            revision_conditions=revision_conditions or [],
             evidence=evidence,
             tags=tags or [],
             confidence=confidence,
@@ -80,6 +86,7 @@ def edp_tools(store: DecisionStore) -> list[Any]:
         key_constraints: list[str],
         evidence: list[str],
         confidence: float = 0.7,
+        revision_conditions: Optional[list[str]] = None,
     ) -> str:
         """Replace an existing EDP decision with a new one; chain is preserved."""
         return store.supersede(
@@ -87,6 +94,7 @@ def edp_tools(store: DecisionStore) -> list[Any]:
             title=title,
             decision=decision,
             key_constraints=key_constraints,
+            revision_conditions=revision_conditions or [],
             evidence=evidence,
             confidence=confidence,
             actor="agent:langgraph",
