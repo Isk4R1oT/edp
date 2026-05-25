@@ -221,14 +221,20 @@ def append_manifest(
     seed: int,
     model: str,
     log_filename: str,
+    verifier_enabled: bool = False,
 ) -> None:
-    """Append one (trajectory_id → (task, condition, seed)) mapping."""
+    """Append one (trajectory_id → (task, condition, seed, verifier_enabled)) mapping.
+
+    `verifier_enabled` distinguishes pre-registered B (False) from mini-experiment
+    Bv (True) at the manifest level so the analysis step can stratify.
+    """
     entry = {
         "trajectory_id": trajectory_id,
         "task_id": task_id,
         "condition": condition,
         "seed": seed,
         "model": model,
+        "verifier_enabled": verifier_enabled,
         "log_filename": log_filename,
         "appended_at": _now_iso(),
     }

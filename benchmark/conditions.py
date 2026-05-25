@@ -4,11 +4,24 @@ Locked at git tag `benchmark-prereg-v1`. Do not modify after that tag without
 opening a new pre-registration cycle.
 
 - A: bare agent, no extra block, no extra MCP server
-- B: bare agent + EDP active block (per-turn hook) + 4 EDP MCP tools + v0.2.0 verifier
+- B: bare agent + EDP active block (per-turn hook) + 4 EDP MCP tools
+     (verifier is OPTIONAL — pass verifier_enabled=True to enable the
+     v0.2.0 PreToolUse verifier hook; default OFF for the main pre-
+     registered study; ON only for the side mini-experiment)
 - C: bare agent + same-token-mass placebo block + 4 noop fern_* MCP tools
 
-The on/off switch is the `setting_sources` and `mcp_servers` options on
-`ClaudeAgentOptions`. Per Anthropic-primary docs:
+Workspace isolation guarantee
+-----------------------------
+Each trajectory runs in its own `workspace/` directory under the run-dir.
+Per-trajectory state — the `.edp/` SQLite store, the `.claude/settings.json`
+file, the task's checkout — lives ONLY inside that workspace. Two parallel
+runs of the same task with the same seed but different conditions cannot
+see each other's `.edp` or `.claude` files; this is the structural
+guarantee that allows the mini-experiment (B with verifier vs B without)
+to be honest.
+
+The on/off switch for EDP itself is the `setting_sources` and `mcp_servers`
+options on `ClaudeAgentOptions`. Per Anthropic-primary docs:
   - `setting_sources=[]` disables filesystem settings entirely (SDK isolation)
   - `strict_mcp_config=True` ignores .mcp.json / plugins, surgical kill switch
   - `mcp_servers={}` is no MCP servers
@@ -20,6 +33,8 @@ References:
 
 from __future__ import annotations
 
+import json
+import sys
 from pathlib import Path
 from typing import Literal
 
@@ -91,15 +106,89 @@ def options_a(*, cwd: Path, model: str, seed: int, temperature: float) -> Claude
     )
 
 
-def options_b(*, cwd: Path, model: str, seed: int, temperature: float) -> ClaudeAgentOptions:
-    """Condition B: EDP active. v0.2.0 — invariants + verifier loop.
+def setup_edp_workspace(cwd: Path, *, verifier_enabled: bool) -> Path:
+    """Stage `cwd/.edp/` (empty store) and `cwd/.claude/settings.json` for condition B.
 
-    Pre-requirements (asserted in runner.py at startup):
+    Each call writes a fresh store and fresh hook config — no cross-trajectory
+    state leak. Called from runner.run_one BEFORE query() so the SDK's
+    setting_sources=["project"] finds the hooks at startup.
+
+    Returns the `.edp/` path so the caller can pass it as EDP_STORE.
+
+    verifier_enabled=False (default for pre-registered B):
+        SessionStart + UserPromptSubmit hooks only. No PreToolUse.
+
+    verifier_enabled=True (mini-experiment only):
+        + PreToolUse hook on Edit | Write | Bash | str_replace_editor.
+        Requires `pip install 'explicit-decision-protocol[verifier]'` +
+        ANTHROPIC_API_KEY in the environment. Hook fails OPEN on missing
+        infra so a misconfigured run still completes.
+    """
+    edp_store_path = cwd / ".edp"
+    edp_store_path.mkdir(parents=True, exist_ok=True)
+
+    # Touch the store so the SQLite file exists (DecisionStore.open is what
+    # creates it on first record; we want it to exist for the hook).
+    from edp.store import DecisionStore  # local import keeps benchmark importable without edp installed
+
+    DecisionStore.open(edp_store_path)
+
+    claude_dir = cwd / ".claude"
+    claude_dir.mkdir(parents=True, exist_ok=True)
+    settings: dict = {
+        "hooks": {
+            "SessionStart": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": f"{sys.executable} -m edp.hook SessionStart"}
+                    ],
+                }
+            ],
+            "UserPromptSubmit": [
+                {
+                    "matcher": "",
+                    "hooks": [
+                        {"type": "command", "command": f"{sys.executable} -m edp.hook UserPromptSubmit"}
+                    ],
+                }
+            ],
+        }
+    }
+    if verifier_enabled:
+        settings["hooks"]["PreToolUse"] = [
+            {
+                "matcher": "Edit|Write|Bash|str_replace_editor",
+                "hooks": [
+                    {"type": "command", "command": f"{sys.executable} -m edp.verifier_hook"}
+                ],
+            }
+        ]
+    (claude_dir / "settings.json").write_text(json.dumps(settings, indent=2) + "\n")
+    return edp_store_path
+
+
+def options_b(
+    *,
+    cwd: Path,
+    model: str,
+    seed: int,
+    temperature: float,
+    verifier_enabled: bool = False,
+) -> ClaudeAgentOptions:
+    """Condition B: EDP active block + 4 MCP tools.
+
+    Per-registered B (verifier_enabled=False, default): visibility-only EDP.
+    Mini-experiment Bv (verifier_enabled=True): adds v0.2.0 PreToolUse
+    verifier hook on write-class tools. The mini-experiment is NOT part of
+    the pre-registered formal study; it lives in `mini_experiment.py`.
+
+    Pre-requirements:
       - `edp-mcp-server` console script importable on PATH
-      - `.claude/settings.json` exists in cwd with both SessionStart and
-        UserPromptSubmit shell hooks for `python -m edp.hook`, and a
-        PreToolUse hook for the v0.2.0 verifier
-      - `EDP_STORE` env points at a fresh `.edp/` under the run's workspace
+      - Caller has run `setup_edp_workspace(cwd, verifier_enabled=...)` to
+        stage `.edp/` and `.claude/settings.json` BEFORE calling this fn
+      - `EDP_STORE` env points at the fresh `.edp/` under the run's workspace
+      - If verifier_enabled: `[verifier]` extra installed + ANTHROPIC_API_KEY
     """
     edp_store_path = cwd / ".edp"
     return ClaudeAgentOptions(
@@ -170,12 +259,24 @@ def options_for(
     model: str,
     seed: int,
     temperature: float,
+    verifier_enabled: bool = False,
 ) -> ClaudeAgentOptions:
-    """Dispatch table for condition → ClaudeAgentOptions."""
+    """Dispatch table for condition → ClaudeAgentOptions.
+
+    `verifier_enabled` only takes effect for condition B; ignored for A and C
+    where it would be meaningless. The runner passes it through when the
+    mini-experiment is being executed.
+    """
     if condition == "A":
         return options_a(cwd=cwd, model=model, seed=seed, temperature=temperature)
     if condition == "B":
-        return options_b(cwd=cwd, model=model, seed=seed, temperature=temperature)
+        return options_b(
+            cwd=cwd,
+            model=model,
+            seed=seed,
+            temperature=temperature,
+            verifier_enabled=verifier_enabled,
+        )
     if condition == "C":
         return options_c(cwd=cwd, model=model, seed=seed, temperature=temperature)
     raise ValueError(f"Unknown condition: {condition!r}; expected one of A, B, C.")

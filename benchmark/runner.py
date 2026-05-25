@@ -46,7 +46,7 @@ from claude_agent_sdk import (
     query,
 )
 
-from benchmark.conditions import ConditionName, options_for
+from benchmark.conditions import ConditionName, options_for, setup_edp_workspace
 from benchmark.logger import (
     StepRecord,
     TrajectoryLogger,
@@ -62,13 +62,21 @@ RATE_LIMIT_BACKOFF_CONCURRENCY: int = 1
 
 @dataclass(frozen=True)
 class RunSpec:
-    """One unit of work: task × condition × seed × model × temperature."""
+    """One unit of work: task × condition × seed × model × temperature.
+
+    verifier_enabled is a flag that only affects condition B: when True, a
+    PreToolUse hook is added to .claude/settings.json that invokes the v0.2.0
+    LLM verifier on write-class tools. Default False (the pre-registered B).
+    The mini-experiment driver toggles this to compare B with vs without
+    verifier on the same task + seed in two isolated workspaces.
+    """
 
     task_id: str
     condition: ConditionName
     seed: int
     model: str
     temperature: float
+    verifier_enabled: bool = False
 
 
 def latin_square_schedule(
@@ -184,10 +192,18 @@ async def run_one(
         seed=spec.seed,
         model=spec.model,
         log_filename=log_path.name,
+        verifier_enabled=spec.verifier_enabled,
     )
 
     # Stage workspace for the task (e.g. SWE-Bench tasks clone a repo).
     task.setup(workspace)
+
+    # For condition B, stage `.edp/` + `.claude/settings.json` inside the
+    # workspace. This is what makes the SDK's setting_sources=["project"]
+    # find the EDP hooks on session start. setup_edp_workspace is a no-op
+    # for conditions A and C (they don't need EDP staged).
+    if spec.condition == "B":
+        setup_edp_workspace(workspace, verifier_enabled=spec.verifier_enabled)
 
     options: ClaudeAgentOptions = options_for(
         spec.condition,
@@ -195,6 +211,7 @@ async def run_one(
         model=spec.model,
         seed=spec.seed,
         temperature=spec.temperature,
+        verifier_enabled=spec.verifier_enabled,
     )
 
     logger = TrajectoryLogger(trajectory_id=trajectory_id, log_path=log_path)
@@ -368,6 +385,7 @@ def _build_specs(
     model: str,
     temperature: float,
     latin_square_seed: int,
+    verifier_enabled: bool = False,
 ) -> list[RunSpec]:
     schedule = latin_square_schedule(
         task_ids=task_ids,
@@ -376,7 +394,14 @@ def _build_specs(
         latin_square_seed=latin_square_seed,
     )
     return [
-        RunSpec(task_id=t, condition=c, seed=s, model=model, temperature=temperature)
+        RunSpec(
+            task_id=t,
+            condition=c,
+            seed=s,
+            model=model,
+            temperature=temperature,
+            verifier_enabled=verifier_enabled,
+        )
         for (t, c, s) in schedule
     ]
 
@@ -397,6 +422,17 @@ def main() -> None:
     parser.add_argument("--concurrency", type=int, default=DEFAULT_CONCURRENCY)
     parser.add_argument("--latin-square-seed", type=int, default=42)
     parser.add_argument("--skip-preflight", action="store_true")
+    parser.add_argument(
+        "--enable-verifier",
+        action="store_true",
+        help=(
+            "EXPERIMENTAL — turn on the v0.2.0 PreToolUse verifier hook for "
+            "condition B trajectories. NOT part of the pre-registered formal "
+            "study; intended only for ad-hoc exploration. Use mini_experiment.py "
+            "for the structured paired comparison (B with verifier vs B without "
+            "on the same task + seed)."
+        ),
+    )
     args = parser.parse_args()
 
     if not args.skip_preflight:
@@ -409,6 +445,7 @@ def main() -> None:
         model=args.model,
         temperature=args.temperature,
         latin_square_seed=args.latin_square_seed,
+        verifier_enabled=args.enable_verifier,
     )
     print(f"[runner] {len(specs)} trajectories scheduled, concurrency={args.concurrency}")
     t0 = time.monotonic()

@@ -59,6 +59,15 @@ def main() -> None:
     )
     parser.add_argument("--condition", default="A", choices=["A", "B", "C"])
     parser.add_argument("--seed", type=int, default=1)
+    parser.add_argument(
+        "--enable-verifier",
+        action="store_true",
+        help=(
+            "Only meaningful with --condition B. Stages a PreToolUse hook that "
+            "invokes the v0.2.0 verifier on write-class tools. Requires "
+            "'pip install explicit-decision-protocol[verifier]' + ANTHROPIC_API_KEY."
+        ),
+    )
     parser.add_argument("--model", default="claude-haiku-4-5",
                         help="Default: Haiku 4.5 (cheap for dry-run). "
                              "Use claude-sonnet-4-6 for cost-realistic dry-run.")
@@ -80,6 +89,7 @@ def main() -> None:
         seed=args.seed,
         model=args.model,
         temperature=args.temperature,
+        verifier_enabled=args.enable_verifier,
     )
     asyncio.run(_drive_one(spec, args.out_dir))
 
