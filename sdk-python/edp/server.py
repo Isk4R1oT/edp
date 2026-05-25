@@ -199,28 +199,37 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
 
     @mcp.tool(annotations=_VERIFY_ANNOTATIONS)
     def edp_verify(planned_action: str) -> CompatibilityReport:
-        """Verify a planned action against active decisions' invariants.
+        """Advisory pre-flight check of a planned action against active invariants.
 
         Per spec §3.6 (v0.2): given a one-line description of what you are
-        about to do, the verifier checks it against the invariants of every
-        active decision and returns one of three verdicts:
+        about to do, an external cheap-model verifier (Haiku-class) checks it
+        against the invariants of every active decision and returns one of
+        three verdicts:
 
           - "compatible": no active invariant is violated; proceed
-          - "violated": at least one invariant is violated; do NOT execute.
-                         violated_decision_ids names which decisions; cite
-                         them when you escalate or call edp_supersede.
+          - "violated": at least one invariant is violated; treat as advisory
+                         block. violated_decision_ids names which decisions;
+                         cite them when you escalate or call edp_supersede.
           - "uncertain": the verifier needs more evidence; escalate to user
                          or call edp_show on a flagged decision to gather it
 
-        Stricter than edp_check (which is lexical/advisory). Verifier calls
-        a cheap external model (Haiku-class) and may cost ~$0.001/call. Use
-        before irreversible or scope-affecting actions; for read-only or
-        already-compatible actions, edp_check is sufficient.
+        **Advisory, not enforcement.** You write your own invariants; you
+        write your own planned actions. The verifier is a second-opinion
+        drift catcher, not a security boundary. A determined agent can
+        always escape the check by rewriting either side.
+
+        Stricter than edp_check (which is lexical/advisory and FTS-only).
+        Verifier calls Haiku-class with prompt caching; cost ≈ $0.0005-$0.002
+        per call with <20 active decisions, grows linearly above.
 
         Requires the [verifier] extra installed and ANTHROPIC_API_KEY set.
         If the verifier is unavailable, returns verdict="uncertain" with
         reasoning naming the missing dependency — the agent decides whether
         to proceed.
+
+        Data egress: sends your planned-action summary + active invariants
+        to Anthropic's API. Do not call on confidential content without
+        operator consent.
 
         Example:
             edp_verify("add XML serializer to GET /reports endpoint")

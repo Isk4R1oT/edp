@@ -349,10 +349,13 @@ def claude_code_install(
         False,
         "--enable-verifier",
         help=(
-            "Install the pre-action verifier hook (spec §3.6 v0.2). Requires "
-            "'pip install explicit-decision-protocol[verifier]' + "
+            "Install the advisory pre-flight verifier hook (spec §3.6 v0.2). "
+            "Requires 'pip install explicit-decision-protocol[verifier]' + "
             "ANTHROPIC_API_KEY. Fails open by default (set EDP_VERIFIER_REQUIRED=1 "
-            "in the hook env to fail closed)."
+            "to fail closed). WARNING: each verified tool call sends the planned-"
+            "action summary + all active decision invariants to Anthropic's API. "
+            "Do NOT enable on projects with confidential architecture without "
+            "explicit operator consent."
         ),
     ),
 ) -> None:
@@ -483,7 +486,7 @@ def claude_code_install(
     if enable_verifier:
         typer.echo()
         typer.secho(
-            "Verifier hook installed (PreToolUse).",
+            "Verifier hook installed (PreToolUse, advisory).",
             fg=typer.colors.CYAN,
             bold=True,
         )
@@ -492,6 +495,22 @@ def claude_code_install(
         typer.echo("  - Requires ANTHROPIC_API_KEY in env")
         typer.echo("  - Fail-open by default; set EDP_VERIFIER_REQUIRED=1 to fail closed")
         typer.echo("  - Verifier runs only when at least one active decision has invariants")
+        typer.echo(
+            f"  - Model: ${{EDP_VERIFIER_MODEL:-{('claude-haiku-4-5-20251001')}}}"
+        )
+        typer.echo()
+        typer.secho(
+            "⚠ DATA EGRESS:",
+            fg=typer.colors.YELLOW,
+            bold=True,
+        )
+        typer.echo("  Each verified tool call sends the planned-action summary + all active")
+        typer.echo("  decision invariants/constraints/triggers to Anthropic's API for the")
+        typer.echo("  cheap-model verifier (Haiku 4.5 by default). The verifier is ADVISORY")
+        typer.echo("  — it is a second-opinion drift catcher, NOT a security boundary against")
+        typer.echo("  a coordinated agent (the agent writes its own invariants and planned")
+        typer.echo("  actions; a determined agent can rewrite either). Do NOT enable on")
+        typer.echo("  projects with confidential architecture without operator consent.")
 
 
 @claude_code_app.command("uninstall")
