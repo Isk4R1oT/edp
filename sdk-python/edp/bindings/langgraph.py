@@ -100,10 +100,13 @@ def edp_before_model(
     *,
     policy: Optional[SelectorPolicy] = None,
     tags: Optional[list[str]] = None,
-) -> Callable:
-    """Build a `@before_model` middleware that prepends the EDP active block.
+):
+    """Build an AgentMiddleware that prepends the EDP active block before each LLM call.
 
-    Usage in LangGraph v1.x:
+    LangChain v1.1+ middleware API: this returns a subclass instance of
+    `langchain.agents.middleware.AgentMiddleware` with `before_model` implemented.
+
+    Usage:
 
         from langchain.agents import create_agent
         agent = create_agent(
@@ -112,23 +115,40 @@ def edp_before_model(
             middleware=[edp_before_model(store)],
         )
 
-    Per spec §8.2: register this middleware BEFORE SummarizationMiddleware.
+    Per spec §8.2: register this middleware BEFORE LangChain's SummarizationMiddleware
+    so the injected EDP block survives summarization.
     """
-    version_state = {"n": 0}
+    try:
+        from langchain.agents.middleware import AgentMiddleware
+    except ImportError as e:
+        raise RuntimeError(
+            "edp_before_model requires LangChain >= 1.1 with langchain.agents.middleware. "
+            "Install with: pip install 'explicit-decision-protocol[langgraph]'"
+        ) from e
 
-    def middleware(state: dict, *args, **kwargs) -> dict:
-        version_state["n"] += 1
-        block = get_active_block(
-            store,
-            version=version_state["n"],
-            context_tags=tags,
-            policy=policy,
-        )
-        msgs = list(state.get("messages") or [])
-        msgs.insert(0, SystemMessage(content=block.text))
-        return {"messages": msgs}
+    class EDPBeforeModel(AgentMiddleware):
+        """Prepends the EDP `<edp:active>` block as a SystemMessage on every LLM call."""
 
-    return middleware
+        def __init__(self) -> None:
+            super().__init__()
+            self._store = store
+            self._policy = policy
+            self._tags = tags
+            self._version = 0
+
+        def before_model(self, state, runtime):
+            self._version += 1
+            block = get_active_block(
+                self._store,
+                version=self._version,
+                context_tags=self._tags,
+                policy=self._policy,
+            )
+            msgs = list(state.get("messages") or [])
+            msgs.insert(0, SystemMessage(content=block.text))
+            return {"messages": msgs}
+
+    return EDPBeforeModel()
 
 
 def inject_into_messages(
