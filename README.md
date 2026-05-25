@@ -225,7 +225,7 @@ edp/
 - [x] Spec v0.1 frozen (tag `v0.1.0-spec`)
 - [x] Evidence pass (`docs/evidence.md`)
 - [x] Sample project layout (`examples/sample-project/`)
-- [x] Python SDK implementation (`sdk-python/`) — 48+ unit tests, 6/6 explicit integration on real LLM (gpt-4.1-mini) + 2/3 naturalistic (honest snippet-first failure on turn 2)
+- [x] Python SDK implementation (`sdk-python/`) — 48 unit tests, 6/6 explicit integration on real LLM (gpt-4.1-mini) + 2/3 naturalistic (honest snippet-first failure on turn 2)
 - [x] Claude Code adapter (standalone hooks form) — `adapters/claude-code-plugin/` · 9 hook tests (incl. primer auto-inject on `SessionStart`) + blank-slate dogfood verified on Opus 4.7 ([trace](docs/dogfood-tinycache.md))
 - [x] MCP server adapter — `adapters/mcp-server/` · install matrix for Claude Desktop / CC / Cursor / Cline / Continue · 5/5 protocol probes pass via `smoke.py`
 - [x] LangGraph adapter — `adapters/middleware-langgraph/` · two injection modes (helper + middleware) · 2 runnable examples

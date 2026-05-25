@@ -19,12 +19,13 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 - `docs/evidence.md` — new §5 "Own dogfood findings" with three buckets
   (blank-slate trial, naturalistic test, explicit integration test) and
   an explicit list of what has NOT yet been measured.
-- `EXAMPLE.md` — now a verbatim walkthrough of the tinycache dogfood
-  trace rather than a synthetic enterprise example.
+- `EXAMPLE.md` — now a walkthrough of the real tinycache dogfood trial
+  (decision bodies verbatim from the store; snippet blocks rendered
+  illustratively) rather than a synthetic enterprise example.
 
 ### Changed
 
-- `README.md` Status & roadmap — refreshed test counts (48+ unit tests,
+- `README.md` Status & roadmap — refreshed test counts (48 unit tests,
   9 hook tests including primer auto-inject) and added v0.1.1 / v0.1.2
   milestones as completed.
 

@@ -1,16 +1,20 @@
 # EDP in action — example session
 
-This walkthrough is a verbatim trace from the `tinycache` blank-slate
-trial documented in [`docs/dogfood-tinycache.md`](docs/dogfood-tinycache.md).
+This walkthrough is a real run from the `tinycache` blank-slate trial
+documented in [`docs/dogfood-tinycache.md`](docs/dogfood-tinycache.md).
+The **decision bodies, key constraints, evidence lists, and
+revision_conditions below are verbatim** from the store on disk
+(`.edp/decisions/DEC-000{1..6}.md`); the `<edp:active>` snippet blocks
+are illustrative renderings of what the agent saw for that store state
+(produced by `render.wrap_active_block`).
+
 A coding agent (Opus 4.7 via Claude Code, standalone hooks adapter) was
 asked to design a tiny in-memory cache library across two sessions.
 **The project's `CLAUDE.md` was empty (`0 bytes`), the store was empty,
 and no user prompt mentioned EDP.** The only EDP signal was the
 ~280-token protocol primer injected once by the `SessionStart` hook.
-
-Everything below — the decisions, the supersede, the cross-session
-causal link — was written by the agent without being instructed to use
-EDP at any point.
+Every `edp_record` and `edp_supersede` call below was made by the agent
+without being instructed to use EDP at any point.
 
 ---
 
@@ -234,8 +238,10 @@ the Redis request triggers exactly that condition, and instead of
 silently implementing Redis it recorded a formal deferral citing
 `DEC-0004` as the technical reason.
 
-A human reviewer reading `.edp/events/` weeks later can reconstruct
-**why** the v0 Redis backend doesn't exist without asking anyone.
+A human reviewer running `edp events --decision DEC-0006` weeks later
+can reconstruct **why** the v0 Redis backend doesn't exist without
+asking anyone — the chain from `DEC-0004`'s `revision_conditions` to
+the `DEC-0006` deferral is in the append-only events log.
 
 ---
 

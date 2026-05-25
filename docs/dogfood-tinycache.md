@@ -3,9 +3,10 @@
 > **TL;DR.** Two real Claude Code sessions on an empty project. `CLAUDE.md` was
 > `0 bytes`. The agent received no human instructions about EDP and no
 > hand-crafted decisions in the store. In session 1 it recorded 4 decisions
-> autonomously. In session 2 (different topic, same store) it formally
-> superseded one of them and deferred a third feature by citing the
-> `revision_conditions` field of a session-1 decision as the blocker.
+> autonomously. In session 2 (different topic, same store) it superseded
+> one of those decisions and recorded a new one deferring a feature
+> request, citing the `revision_conditions` field of a session-1 decision
+> as the technical blocker.
 >
 > This is the empirical claim behind every numerical statement in
 > `README.md`. Everything below is reproducible.
@@ -25,12 +26,13 @@ echo "" > src/tinycache/__init__.py
 edp init                                        # creates .edp/
 # No `edp record` seeded. Store is empty.
 
-# Drop in the standalone Claude Code adapter:
+# Drop in the standalone Claude Code adapter — $EDP_REPO is your local
+# checkout of github.com/Isk4R1oT/edp (or wherever you cloned it):
 mkdir -p .claude/commands
 cp $EDP_REPO/adapters/claude-code-plugin/standalone/settings.json.example .claude/settings.json
 cp $EDP_REPO/adapters/claude-code-plugin/standalone/.mcp.json.example .claude/.mcp.json
 cp $EDP_REPO/adapters/claude-code-plugin/standalone/commands/*.md .claude/commands/
-# Edit the two example paths to point at the local checkout.
+# Edit the two example paths to point at $EDP_REPO/adapters/claude-code-plugin/standalone/.
 
 claude                                          # session 1 starts
 ```
@@ -158,8 +160,10 @@ request triggers exactly that condition — and instead of silently
 implementing Redis, it recorded the deferral with `DEC-0004` cited
 explicitly as the technical reason.
 
-A human reviewer reading `.edp/events/` weeks later can reconstruct why
-the v0 Redis backend doesn't exist without asking anyone.
+A human reviewer running `edp events --decision DEC-0006` weeks later
+can reconstruct why the v0 Redis backend doesn't exist without asking
+anyone — the chain from `DEC-0004`'s `revision_conditions` to the
+`DEC-0006` deferral is in the append-only events log.
 
 ---
 
