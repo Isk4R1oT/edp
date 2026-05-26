@@ -68,7 +68,7 @@ def test_full_markdown_includes_revision_conditions_section():
 def test_wrap_active_block_includes_precedence():
     text = wrap_active_block(["DEC-0001 [active]\n  Title: x"], version=3, total_active=1)
     assert '<edp:active version="3">' in text
-    assert "Active: 1" in text
+    assert "Active decisions: 1" in text
     assert 'use only version="3"' in text
 
 

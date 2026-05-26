@@ -5,7 +5,7 @@ Implements §4 (Active block format) and the markdown projection of §7.3.
 
 from __future__ import annotations
 
-from edp.models import Decision
+from edp.models import Constraint, Decision
 
 
 # Protocol primer — short onboarding block that adapters MAY inject once per
@@ -16,11 +16,17 @@ from edp.models import Decision
 # every-turn injection (waste of tokens).
 PROTOCOL_PRIMER = (
     '<edp:protocol>\n'
-    "You have access to EDP — Explicit Decision Protocol. Five tools available\n"
+    "You have access to EDP — Explicit Decision Protocol. Tools available\n"
     "(prefixed by your harness, e.g. mcp__edp__* in MCP):\n"
     "\n"
+    "Two primitives:\n"
+    "  CONSTRAINTS (CON-NNNN) — non-negotiable axioms. Never violate them;\n"
+    "    cannot be superseded by you. Risk limits, safety rules, compliance.\n"
+    "  DECISIONS (DEC-NNNN)   — revisable architectural choices with rationale.\n"
+    "    You may supersede them when conditions change.\n"
+    "\n"
     "  edp_record(title, decision, key_constraints, evidence, invariants=[], ...)\n"
-    "    Commit an architectural decision. You are autonomous — record what\n"
+    "    Commit an architectural DECISION. You are autonomous — record what\n"
     "    your future-self should respect; do NOT wait for human approval.\n"
     "    provisional=False by default. invariants are machine-checkable\n"
     "    predicates the verifier enforces (e.g. 'all responses MUST be JSON,\n"
@@ -29,25 +35,33 @@ PROTOCOL_PRIMER = (
     "    triggers (e.g. 'latency p95 > 50ms'); separate from time-based\n"
     "    review_due_at_step.\n"
     "\n"
+    "  edp_constraints()\n"
+    "    List non-negotiable axioms (constraints). Always read first when\n"
+    "    your action touches a domain a constraint covers — they are absolute.\n"
+    "    The active block shows them at the top, never trimmed.\n"
+    "\n"
     "  edp_check(planned_action)\n"
     "    Lexical advisory: surface decisions that may apply to a planned move.\n"
     "    FTS5 keyword match — fast, free, useful for routine pre-action scans.\n"
     "\n"
     "  edp_verify(planned_action)\n"
     "    ADVISORY pre-flight check: a cheap external model reads your planned\n"
-    "    action and active invariants, returns compatible | violated |\n"
-    "    uncertain. On 'violated' treat as advisory block — revise plan, or\n"
-    "    call edp_supersede if the decision should change. Stricter than\n"
-    "    edp_check (LLM not lexical). Sends planned-action + invariants to\n"
-    "    Anthropic's API; only call on non-sensitive content.\n"
+    "    action against active CONSTRAINTS and decision invariants, returns\n"
+    "    compatible | violated | uncertain. On 'violated' treat as advisory\n"
+    "    block — revise plan, or call edp_supersede if the decision should\n"
+    "    change (constraints CANNOT be superseded). Stricter than edp_check\n"
+    "    (LLM not lexical). Sends planned-action + rules to Anthropic's API;\n"
+    "    only call on non-sensitive content.\n"
     "\n"
     "  edp_show(decision_id)\n"
     "    Full body (decision, evidence, alternatives, history) when the\n"
     "    snippet headline isn't enough.\n"
     "\n"
     "  edp_supersede(old_id, ...)\n"
-    "    Formal replace — preserves chain. Never silently bypass an active\n"
-    "    decision; if it must change, supersede explicitly.\n"
+    "    Formal replace for a DECISION — preserves chain. Never silently\n"
+    "    bypass an active decision; if it must change, supersede explicitly.\n"
+    "    Does NOT apply to constraints (CON-*) — those are axioms; escalate\n"
+    "    to the operator if a constraint is wrong.\n"
     "\n"
     "EDP is your own working memory of architectural commitments across\n"
     "sessions. The <edp:active> block below is your binding context. Snippet\n"
@@ -103,6 +117,22 @@ def render_snippet(dec: Decision, *, max_constraints: int = 3) -> str:
     return "\n".join(out)
 
 
+def render_constraint_snippet(con: Constraint) -> str:
+    """Render a constraint as a single line for the active block.
+
+    Constraints are axioms, not heuristics: layout intentionally minimal so
+    the agent sees the rule itself rather than metadata. Tags shown in
+    compact form; provisional ones are marked because they still need human
+    confirmation.
+    """
+    parts = [con.id]
+    if con.provisional:
+        parts.append("[provisional]")
+    head = " ".join(parts)
+    tag_suffix = f"  ({', '.join(con.tags[:3])})" if con.tags else ""
+    return f"  {head}: {con.rule}{tag_suffix}"
+
+
 def wrap_active_block(
     snippets: list[str],
     *,
@@ -110,21 +140,42 @@ def wrap_active_block(
     total_active: int,
     trimmed: int = 0,
     include_primer: bool = False,
+    constraint_snippets: list[str] | None = None,
+    total_constraints: int = 0,
 ) -> str:
     """Wrap snippets into the spec-mandated <edp:active version="N"> block.
 
     Includes the mandatory precedence line per §4.2. If include_primer is True,
     the PROTOCOL_PRIMER is prepended — recommended on first-injection-per-session
     (typically SessionStart hooks), discouraged on every-turn injection.
+
+    v0.3 (§3.8): if constraint_snippets is non-empty, a "Constraints
+    (non-negotiable axioms)" section is rendered at the top of the block,
+    before the decisions section. Constraints are never trimmed.
     """
     empty_hint = (
         "(no active decisions yet — this is your working memory; "
         "record commitments your future-self should respect via edp_record)"
     )
-    body = "\n".join(snippets) if snippets else empty_hint
-    footer_count = f"Active: {total_active}"
+    sections: list[str] = []
+    if constraint_snippets:
+        sections.append(
+            "Constraints (non-negotiable axioms — violation must be refused):\n"
+            + "\n".join(constraint_snippets)
+        )
+        sections.append("Decisions (revisable via edp_supersede):")
+    sections.append("\n".join(snippets) if snippets else empty_hint)
+    body = "\n".join(sections)
+
+    footer_count_parts = []
+    if total_constraints:
+        footer_count_parts.append(f"Constraints: {total_constraints}")
+    footer_count_parts.append(f"Active decisions: {total_active}")
     if trimmed:
-        footer_count += f" (showing {total_active - trimmed}; {trimmed} trimmed for budget)"
+        footer_count_parts[-1] += (
+            f" (showing {total_active - trimmed}; {trimmed} trimmed for budget)"
+        )
+    footer_count = " · ".join(footer_count_parts)
     footer = (
         f"\n{footer_count} · `edp.show(id)` full body · "
         f"`edp.check(action)` lexical advisory · "
@@ -137,6 +188,31 @@ def wrap_active_block(
     if include_primer:
         return PROTOCOL_PRIMER + "\n" + block
     return block
+
+
+def render_constraint_markdown(con: Constraint) -> str:
+    """Render a constraint as its canonical .md projection.
+
+    Minimal frontmatter (no status, no chain — by design). Body is just the
+    rule itself; constraints are axioms, not narratives.
+    """
+    lines = [
+        "---",
+        f"id: {con.id}",
+        f"created_at_ts: {con.created_at_ts.isoformat()}",
+        f"created_by: {con.created_by}",
+    ]
+    if con.tags:
+        lines.append(f"tags: [{', '.join(con.tags)}]")
+    if con.provisional:
+        lines.append("provisional: true")
+    lines.append("---")
+    lines.append("")
+    lines.append("## Rule")
+    lines.append("")
+    lines.append(con.rule)
+    lines.append("")
+    return "\n".join(lines)
 
 
 def render_full_markdown(dec: Decision) -> str:

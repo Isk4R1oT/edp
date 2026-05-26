@@ -1,7 +1,8 @@
-"""Pydantic models for EDP Decision records.
+"""Pydantic models for EDP records.
 
-Schema source: spec/v0.1/schema.json
-Spec sections: §3.1 (required), §3.2 (optional), §3.3 (status workflow)
+Schema source: spec/v0.1/schema.json (decisions); spec §3.8 (constraints, v0.3).
+Spec sections: §3.1 (required), §3.2 (optional), §3.3 (status workflow),
+§3.8 (constraints — non-negotiable axioms primitive, v0.3).
 """
 
 from datetime import datetime, timezone
@@ -103,6 +104,41 @@ class Decision(BaseModel):
         return self.model_dump_json(exclude_none=False)
 
 
+ConstraintMode = Literal["human_only", "agent_auto", "agent_provisional"]
+
+
+class Constraint(BaseModel):
+    """A non-negotiable axiom (v0.3, spec §3.8).
+
+    Distinct from Decision: a constraint is a permanent rule with no revision
+    conditions, no alternatives considered, no confidence — it just IS. The
+    typical example is a hard safety / risk / compliance rule that the agent
+    must never violate regardless of context. Modifying a constraint is a
+    remove-then-add operation; there is no supersede chain because there is
+    no rationale to preserve.
+
+    Constraints are always rendered at the top of the active block and are
+    never trimmed for token budget. The verifier treats a constraint
+    violation as more severe than an invariant violation: it is an axiom,
+    not a heuristic.
+
+    Authorship is mode-gated (EDP_CONSTRAINT_MODE):
+      - "human_only"        — only CLI; agent can read but not create
+      - "agent_auto"        — agent can create directly via MCP
+      - "agent_provisional" — agent creates provisional=true, human confirms
+    """
+
+    id: str = Field(pattern=r"^CON-\d{4,}$")
+    rule: str = Field(max_length=200)
+    created_at_ts: datetime
+    created_by: str
+    tags: list[str] = Field(default_factory=list)
+    provisional: bool = False
+
+    def model_dump_storage(self) -> str:
+        return self.model_dump_json(exclude_none=False)
+
+
 class RelevanceMatch(BaseModel):
     id: str
     relevance: float = Field(ge=0.0, le=1.0)
@@ -154,6 +190,12 @@ class Event(BaseModel):
         "reject",
         "review",
         "verify",
+        # Constraint events (v0.3, §3.8). Constraints have no supersede chain;
+        # mutation is add → remove. `con_confirm` promotes a provisional
+        # constraint (typically agent-suggested) to non-provisional.
+        "con_add",
+        "con_remove",
+        "con_confirm",
     ]
     payload: dict
 

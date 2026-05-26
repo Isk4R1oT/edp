@@ -144,6 +144,36 @@ A `revisit(event_description)` tool that actively scans triggers for relevance i
 
 The distinction matters: `review_due_at_step` is **passive** (timer fires regardless of state); `revision_conditions` is **active** (state changes fire regardless of timer). A well-formed decision usually has both — one as a backstop, the other as the live signal.
 
+### 3.9 Constraints — non-negotiable axioms (v0.3)
+
+A second first-class primitive alongside `Decision`: a `Constraint` is a permanent rule the agent MUST never violate, with no rationale to preserve when it changes.
+
+**Decision vs constraint — categorical difference, not a sliding scale:**
+
+| Aspect                  | `Decision` (DEC-NNNN) | `Constraint` (CON-NNNN) |
+| ----------------------- | --------------------- | ----------------------- |
+| Reversible              | Yes via `supersede()` | Yes via `remove()` then `add()` — **no chain** |
+| `revision_conditions`   | Yes                   | **No** (axioms have no conditions) |
+| `alternatives`          | Yes                   | **No**  |
+| `confidence`            | Yes (0.0–1.0)         | **No** (axioms are absolute) |
+| `status` lifecycle      | Yes (proposed/active/superseded/…) | **No** (present or absent) |
+| Trimmable from active block | Yes, by token budget | **No, ever** |
+| Verifier severity       | Invariant violation   | **Strictly more severe** |
+
+A constraint's payload is intentionally minimal — `id`, `rule` (≤200 chars), `created_at_ts`, `created_by`, `tags`, `provisional`. That's it. If you find yourself wanting `revision_conditions` or `alternatives` for a candidate constraint, it is not a constraint — record it as a decision instead.
+
+**Authorship mode (`EDP_CONSTRAINT_MODE`).** Constraints encode operator policy. By default the agent MUST NOT create them:
+
+  - `human_only` (default) — CLI only. MCP `edp_add_constraint` is **not registered** on the server surface at all.
+  - `agent_auto` — agent can create directly via MCP.
+  - `agent_provisional` — agent creates with `provisional=true`; an operator promotes via `edp constraint confirm CON-NNNN` (a `con_confirm` event in the log).
+
+**Verifier semantics.** When the verifier runs (per §3.6), constraints are passed in a dedicated `ACTIVE CONSTRAINTS` section of the prompt with stricter framing: ambiguity must resolve to `uncertain`, not `compatible`. A `violated` verdict citing a `CON-*` id is non-supersedable — the agent must revise the plan or escalate; calling `edp_supersede` on a constraint id is a contract violation and the gate refuses it.
+
+**Active block placement.** Constraints render at the top of `<edp:active>`, before the decisions section, and are never trimmed for token budget. The block footer becomes `Constraints: N · Active decisions: M` when at least one constraint is present (back-compat: `Active decisions: M` only, when none).
+
+**Why this separation matters.** Wedging axioms into `Decision.key_constraints` (the v0.2 workaround) loses three things at once: (1) the verifier cannot apply the right severity, (2) the selector cannot pin them, and (3) authorship becomes ambiguous — an agent can write a "decision" whose key_constraint reads like a self-imposed limit, then supersede itself out of it. v0.3 closes all three: distinct primitive, distinct storage, distinct authorship policy.
+
 ---
 
 ## 4. The active block (snippet injection)

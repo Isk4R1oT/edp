@@ -218,6 +218,110 @@ def checkpoint(
     typer.echo("OK")
 
 
+# ── Constraints (v0.3, spec §3.8) ─────────────────────────────────────────────
+
+constraint_app = typer.Typer(
+    name="constraint",
+    help="Manage non-negotiable axioms (constraints) — distinct from revisable decisions.",
+    no_args_is_help=True,
+)
+app.add_typer(constraint_app, name="constraint")
+
+
+@constraint_app.command("add")
+def constraint_add(
+    rule: str = typer.Option(..., "--rule", help="The constraint statement (≤200 chars)"),
+    tag: list[str] = typer.Option([], "--tag", help="Tag (repeatable)"),
+    provisional: bool = typer.Option(
+        False,
+        "--provisional",
+        help="Mark as awaiting human confirmation (used when agent suggests).",
+    ),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Add a constraint. Prints the assigned CON-NNNN id."""
+    store = _store(store_path)
+    con_id = store.add_constraint(
+        rule=rule,
+        tags=tag,
+        provisional=provisional,
+        actor=_actor(),
+    )
+    typer.echo(con_id)
+
+
+@constraint_app.command("list")
+def constraint_list(
+    tag: Optional[str] = typer.Option(None, "--tag", help="Filter by tag"),
+    include_provisional: bool = typer.Option(
+        True, "--include-provisional/--no-provisional"
+    ),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """List all constraints."""
+    store = _store(store_path)
+    rows = store.list_constraints(tag=tag, include_provisional=include_provisional)
+    if not rows:
+        typer.echo("(no constraints)")
+        return
+    for c in rows:
+        prov = " [provisional]" if c.provisional else ""
+        tags = f"  ({', '.join(c.tags)})" if c.tags else ""
+        typer.echo(f"{c.id}{prov}: {c.rule}{tags}")
+
+
+@constraint_app.command("show")
+def constraint_show(
+    constraint_id: str = typer.Argument(...),
+    as_json: bool = typer.Option(False, "--json"),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Show one constraint."""
+    from edp.render import render_constraint_markdown
+
+    store = _store(store_path)
+    try:
+        con = store.show_constraint(constraint_id)
+    except DecisionNotFound as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(code=2)
+    if as_json:
+        typer.echo(json.dumps(con.model_dump(mode="json"), indent=2))
+    else:
+        typer.echo(render_constraint_markdown(con))
+
+
+@constraint_app.command("remove")
+def constraint_remove(
+    constraint_id: str = typer.Argument(...),
+    reason: Optional[str] = typer.Option(None, "--reason"),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Remove a constraint. History preserved in the event log."""
+    store = _store(store_path)
+    try:
+        store.remove_constraint(constraint_id, reason=reason, actor=_actor())
+    except DecisionNotFound as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(code=2)
+    typer.echo(f"Removed {constraint_id}")
+
+
+@constraint_app.command("confirm")
+def constraint_confirm(
+    constraint_id: str = typer.Argument(...),
+    store_path: Optional[str] = typer.Option(None, "--store"),
+) -> None:
+    """Promote a provisional constraint to confirmed."""
+    store = _store(store_path)
+    try:
+        store.confirm_constraint(constraint_id, actor=_actor())
+    except DecisionNotFound as e:
+        typer.echo(f"error: {e}", err=True)
+        raise typer.Exit(code=2)
+    typer.echo(f"Confirmed {constraint_id}")
+
+
 @app.command()
 def serve(
     store_path: Optional[str] = typer.Option(None, "--store"),

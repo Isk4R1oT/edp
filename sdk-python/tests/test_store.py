@@ -252,7 +252,8 @@ def test_schema_version_recorded(tmp_store):
     ).fetchone()
     conn.close()
     assert row is not None
-    assert row[0] == 1
+    # v0.3 bumped schema to 2 (constraints_current table + last_constraint_id counter).
+    assert row[0] == 2
 
 
 def test_record_uses_single_write_txn(tmp_store):

@@ -80,18 +80,19 @@ def _decide(payload: dict, edp_dir: Path) -> dict:
 
     store = DecisionStore.open(edp_dir)
     active = store.list_active()
+    constraints = store.list_constraints(include_provisional=False)
 
-    # Only verify when at least one active decision carries invariants.
-    # If no invariants exist anywhere, the verifier has nothing to check;
-    # skip the call to save cost and latency.
-    if not any(d.invariants for d in active):
-        return _allow("no active invariants to check")
+    # Verify when at least one active decision carries invariants OR there
+    # is at least one confirmed constraint. If neither exists the verifier
+    # has nothing to check; skip the call to save cost and latency.
+    if not any(d.invariants for d in active) and not constraints:
+        return _allow("no active invariants or constraints to check")
 
     from edp.verifier import VerifierUnavailable, verify
 
     required = os.environ.get("EDP_VERIFIER_REQUIRED") == "1"
     try:
-        report = verify(planned, active)
+        report = verify(planned, active, active_constraints=constraints)
     except VerifierUnavailable as e:
         if required:
             return _deny(
@@ -102,12 +103,24 @@ def _decide(payload: dict, edp_dir: Path) -> dict:
 
     if report.verdict == "violated":
         cited = ", ".join(report.violated_decision_ids) or "(unspecified)"
-        reason = (
-            f"EDP verifier blocked this action: {report.reasoning} "
-            f"Violates: {cited}. To proceed, either revise the plan to comply "
-            f"with the active decision(s), or call mcp__edp__edp_supersede if "
-            f"the decision should change."
+        has_constraint = any(
+            i.startswith("CON-") for i in report.violated_decision_ids
         )
+        if has_constraint:
+            reason = (
+                f"EDP verifier blocked this action: {report.reasoning} "
+                f"Violates: {cited}. Constraints (CON-*) are non-negotiable "
+                f"axioms — they cannot be superseded by the agent. Revise the "
+                f"plan to comply, or escalate to the operator if the constraint "
+                f"is wrong."
+            )
+        else:
+            reason = (
+                f"EDP verifier blocked this action: {report.reasoning} "
+                f"Violates: {cited}. To proceed, either revise the plan to comply "
+                f"with the active decision(s), or call mcp__edp__edp_supersede if "
+                f"the decision should change."
+            )
         return _deny(reason)
 
     if report.verdict == "uncertain":

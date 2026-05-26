@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterator, Optional
 
 from edp.models import (
+    Constraint,
     Decision,
     Event,
     RelevanceMatch,
@@ -28,9 +29,10 @@ DEFAULT_STORE_DIR = ".edp"
 STORE_DB_FILENAME = "store.db"
 
 # Current SDK schema version. Bumped when the SQLite schema gains new tables
-# or columns. Migration runner deferred to v0.2; for now we just record the
-# version a freshly initialised store was created under.
-_SDK_SCHEMA_VERSION = 1
+# or columns. v2 (0.3) introduces the constraints_current table + counter
+# for the constraint primitive (spec §3.8). Migration is forward-only and
+# idempotent: CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE counter row.
+_SDK_SCHEMA_VERSION = 2
 
 # Required SQLite pragmas per spec §7.4. Note: wal_autocheckpoint=1000 is
 # SQLite's default — explicit periodic wal_checkpoint(TRUNCATE) is what
@@ -80,6 +82,12 @@ CREATE VIRTUAL TABLE IF NOT EXISTS decisions_fts USING fts5(
     decision,
     key_constraints
 );
+
+CREATE TABLE IF NOT EXISTS constraints_current (
+    id          TEXT PRIMARY KEY,
+    data        TEXT NOT NULL,
+    updated_ts  TEXT NOT NULL
+);
 """
 
 
@@ -107,12 +115,18 @@ class DecisionStore:
         store_dir = Path(store_dir)
         store_dir.mkdir(parents=True, exist_ok=True)
         (store_dir / "decisions").mkdir(exist_ok=True)
+        (store_dir / "constraints").mkdir(exist_ok=True)
         return cls(store_dir / STORE_DB_FILENAME)
 
     @property
     def decisions_dir(self) -> Path:
         """Default location for the human-readable markdown projection (`.edp/decisions/`)."""
         return self.db_path.parent / "decisions"
+
+    @property
+    def constraints_dir(self) -> Path:
+        """Default location for constraint markdown projection (`.edp/constraints/`, v0.3)."""
+        return self.db_path.parent / "constraints"
 
     def _connect(self) -> sqlite3.Connection:
         conn = sqlite3.connect(self.db_path, isolation_level=None, timeout=5.0)
@@ -131,6 +145,14 @@ class DecisionStore:
             if row is None:
                 conn.execute(
                     "INSERT INTO counters(name, value) VALUES('last_decision_id', 0)"
+                )
+            # v0.3: constraint counter. Idempotent.
+            con_row = conn.execute(
+                "SELECT value FROM counters WHERE name='last_constraint_id'"
+            ).fetchone()
+            if con_row is None:
+                conn.execute(
+                    "INSERT INTO counters(name, value) VALUES('last_constraint_id', 0)"
                 )
             # Record schema version on first init. Idempotent — if this row
             # already exists we don't overwrite (preserves the original init ts).
@@ -475,6 +497,179 @@ class DecisionStore:
             if len(matches) >= limit:
                 break
         return RelevanceReport(related=matches)
+
+    # ── Constraints API (v0.3, spec §3.8) ─────────────────────────────────────
+
+    def add_constraint(
+        self,
+        *,
+        rule: str,
+        actor: str = "human:cli",
+        tags: Optional[list[str]] = None,
+        provisional: bool = False,
+        project_markdown: bool = True,
+    ) -> str:
+        """Create a new constraint and return its id (CON-NNNN).
+
+        Constraints are axioms — there is no supersede chain, no
+        revision_conditions, no confidence. Mutation = remove + add. If
+        the agent is suggesting a constraint (under EDP_CONSTRAINT_MODE=
+        agent_provisional), pass provisional=True; a human confirms via
+        confirm_constraint().
+        """
+        ts = utcnow()
+        with self._write_txn() as conn:
+            con_id = self._next_constraint_id_within_txn(conn)
+            con = Constraint(
+                id=con_id,
+                rule=rule,
+                created_at_ts=ts,
+                created_by=actor,
+                tags=tags or [],
+                provisional=provisional,
+            )
+            self._append_constraint_event(conn, op="con_add", con=con, actor=actor)
+            self._upsert_constraint(conn, con)
+        if project_markdown:
+            self.export_constraint_markdown(con_id, self.constraints_dir)
+        return con_id
+
+    def remove_constraint(
+        self,
+        constraint_id: str,
+        *,
+        actor: str = "human:cli",
+        reason: Optional[str] = None,
+    ) -> None:
+        """Remove an active constraint. Hard delete from current view; full
+        history preserved in the event log. Reason is appended to the event
+        payload for audit ("policy change", "merged into CON-NNNN", etc).
+        """
+        con = self.show_constraint(constraint_id)  # raises if not present
+        with self._write_txn() as conn:
+            payload = con.model_dump(mode="json")
+            if reason:
+                payload["_remove_reason"] = reason
+            conn.execute(
+                "INSERT INTO events(ts, actor, decision_id, op, payload) VALUES (?, ?, ?, ?, ?)",
+                (
+                    utcnow().isoformat(),
+                    actor,
+                    constraint_id,
+                    "con_remove",
+                    json.dumps(payload),
+                ),
+            )
+            conn.execute(
+                "DELETE FROM constraints_current WHERE id = ?", (constraint_id,)
+            )
+        # Markdown projection removed too, so future renderers reflect reality.
+        path = self.constraints_dir / f"{constraint_id}.md"
+        if path.exists():
+            path.unlink()
+
+    def confirm_constraint(
+        self,
+        constraint_id: str,
+        *,
+        actor: str = "human:cli",
+    ) -> None:
+        """Promote a provisional constraint to non-provisional (operator
+        confirms an agent-suggested rule). Idempotent on already-confirmed.
+        """
+        con = self.show_constraint(constraint_id)
+        if not con.provisional:
+            return
+        promoted = con.model_copy(update={"provisional": False})
+        with self._write_txn() as conn:
+            self._append_constraint_event(
+                conn, op="con_confirm", con=promoted, actor=actor
+            )
+            self._upsert_constraint(conn, promoted)
+        self.export_constraint_markdown(constraint_id, self.constraints_dir)
+
+    def show_constraint(self, constraint_id: str) -> Constraint:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT data FROM constraints_current WHERE id = ?",
+                (constraint_id,),
+            ).fetchone()
+        if row is None:
+            raise DecisionNotFound(f"unknown constraint {constraint_id!r}")
+        return Constraint.model_validate_json(row["data"])
+
+    def list_constraints(
+        self,
+        *,
+        tag: Optional[str] = None,
+        include_provisional: bool = True,
+    ) -> list[Constraint]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT data FROM constraints_current ORDER BY id ASC"
+            ).fetchall()
+        out = [Constraint.model_validate_json(r["data"]) for r in rows]
+        if not include_provisional:
+            out = [c for c in out if not c.provisional]
+        if tag is not None:
+            out = [c for c in out if tag in c.tags]
+        return out
+
+    def export_constraint_markdown(
+        self, constraint_id: str, target_dir: Path
+    ) -> Path:
+        from edp.render import render_constraint_markdown
+
+        con = self.show_constraint(constraint_id)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        path = target_dir / f"{con.id}.md"
+        path.write_text(render_constraint_markdown(con), encoding="utf-8")
+        return path
+
+    def _next_constraint_id_within_txn(self, conn: sqlite3.Connection) -> str:
+        conn.execute(
+            "UPDATE counters SET value = value + 1 WHERE name='last_constraint_id'"
+        )
+        row = conn.execute(
+            "SELECT value FROM counters WHERE name='last_constraint_id'"
+        ).fetchone()
+        return f"CON-{row['value']:04d}"
+
+    def _upsert_constraint(
+        self, conn: sqlite3.Connection, con: Constraint
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO constraints_current(id, data, updated_ts)
+            VALUES (?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                data = excluded.data,
+                updated_ts = excluded.updated_ts
+            """,
+            (con.id, con.model_dump_json(), utcnow().isoformat()),
+        )
+
+    def _append_constraint_event(
+        self,
+        conn: sqlite3.Connection,
+        *,
+        op: str,
+        con: Constraint,
+        actor: str,
+    ) -> None:
+        # Constraint events reuse the events table; decision_id column holds
+        # the CON-NNNN id (column name kept for backwards compat — semantic
+        # is "record id", not "decision id only").
+        conn.execute(
+            "INSERT INTO events(ts, actor, decision_id, op, payload) VALUES (?, ?, ?, ?, ?)",
+            (
+                utcnow().isoformat(),
+                actor,
+                con.id,
+                op,
+                con.model_dump_json(),
+            ),
+        )
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 

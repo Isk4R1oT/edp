@@ -36,11 +36,12 @@ def test_install_fresh_writes_all_files(tmp_project):
     assert (tmp_project / ".claude" / "settings.json").exists()
     assert (tmp_project / ".claude" / ".mcp.json").exists()
 
-    # Six slash commands
+    # Seven slash commands (v0.3: + edp-constraints)
     cmd_dir = tmp_project / ".claude" / "commands"
     cmds = sorted(f.name for f in cmd_dir.glob("edp-*.md"))
     assert cmds == [
         "edp-check.md",
+        "edp-constraints.md",
         "edp-events.md",
         "edp-list.md",
         "edp-record.md",

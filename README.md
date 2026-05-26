@@ -80,16 +80,25 @@ This keeps context cost flat (target ≤2k tokens per block) while preserving th
 
 ---
 
-## The four tools the agent sees
+## Two primitives, six tools the agent sees
+
+EDP has **two** kinds of records, by design:
+
+- **Decisions (`DEC-NNNN`)** — revisable architectural choices, with rationale, alternatives considered, and (sometimes) explicit revision conditions. The agent can supersede these when conditions change.
+- **Constraints (`CON-NNNN`)** *(v0.3)* — non-negotiable axioms: risk limits, safety rules, compliance requirements. They have no rationale to preserve, no revision conditions, and the agent **cannot** supersede them — only the operator can. They render at the top of the snippet block and are never trimmed for token budget.
 
 ```
 edp.show(id)              # full body of one decision
 edp.check(action_desc)    # which active decisions are relevant to this action
-edp.record(decision, …)   # create new decision; snippet appears next turn
-edp.supersede(old_id, …)  # replace decision; chain is preserved
+edp.record(decision, …)   # create a new decision; snippet appears next turn
+edp.supersede(old_id, …)  # replace a decision; chain is preserved (decisions only)
+edp.verify(action_desc)   # LLM-advisory: does this action violate any constraint or invariant?
+edp.constraints()         # list the non-negotiable axioms (v0.3)
 ```
 
-That is the entire surface. Implementations may add helpers (`list`, `history`, `due`), but these four are the contract.
+That is the entire surface. Implementations may add helpers (`list`, `history`, `due`), but these are the contract.
+
+The asymmetric authorship for constraints is intentional and configurable via `EDP_CONSTRAINT_MODE`: `human_only` (default, agent can read but not create), `agent_auto`, or `agent_provisional` (agent creates `provisional=true`, operator confirms via `edp constraint confirm`).
 
 ---
 

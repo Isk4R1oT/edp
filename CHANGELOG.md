@@ -8,6 +8,92 @@ Specification versions are date-stamped (`edp/YYYY-MM-DD`), not semver. SDK vers
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-26
+
+The "constraints primitive" release. v0.3 introduces a second first-class
+primitive alongside `Decision`: a non-negotiable **`Constraint`** (axiom).
+
+Rationale (from the source `decision-protocol-template.md` reread plus
+operator feedback): conflating axioms with decisions is a categorical
+error. A risk limit like "max leverage 10x" has no revision conditions,
+no alternatives considered, no rationale to preserve when it changes —
+modifying it is a remove-then-add operation, not a supersede chain. EDP
+v0.1/v0.2 wedged these into `Decision.key_constraints` strings, which
+the verifier read but treated as ordinary invariants. v0.3 separates the
+two so the verifier can apply the right severity, and so the active
+block can pin constraints at the top, never trimmed for token budget.
+
+### Added
+
+- **`Constraint` model** (`edp.models.Constraint`) — id (CON-NNNN), rule
+  (≤200 chars), `created_at_ts`, `created_by`, `tags`, `provisional`.
+  Intentionally minimal: no status, no supersede chain, no
+  revision_conditions, no confidence. Axioms are absolute or they are
+  not axioms.
+- **SQLite `constraints_current` table** + `last_constraint_id` counter.
+  Schema bumped to v2. Migration is forward-only and idempotent
+  (CREATE TABLE IF NOT EXISTS + INSERT OR IGNORE counter row) — existing
+  v0.2 stores upgrade transparently on first open.
+- **Store CRUD**: `DecisionStore.add_constraint`, `list_constraints`,
+  `show_constraint`, `remove_constraint`, `confirm_constraint`. Append-
+  only event log records `con_add` / `con_remove` / `con_confirm` ops.
+- **CLI**: `edp constraint add|list|show|remove|confirm`.
+- **MCP tools**:
+  - `edp_constraints()` — read, always exposed
+  - `edp_add_constraint(rule, tags=...)` — mode-gated by
+    `EDP_CONSTRAINT_MODE` env var:
+    - `human_only` (default) — agent CANNOT create constraints; tool
+      is hidden from the MCP surface entirely. Operator-only via CLI.
+    - `agent_auto` — agent creates directly.
+    - `agent_provisional` — agent creates `provisional=True`; operator
+      confirms via `edp constraint confirm CON-NNNN`.
+- **Active-block constraints section** — rendered at the top of
+  `<edp:active>`, before decisions, **never trimmed** for token budget.
+  Header: "Constraints (non-negotiable axioms — violation must be
+  refused)". Footer line gains `Constraints: N` count.
+- **Verifier integration** — `verify(planned_action, active_decisions,
+  active_constraints=...)`. Constraints render in a dedicated
+  `ACTIVE CONSTRAINTS` section of the prompt; the system prompt
+  instructs the verifier model to treat constraint violations as
+  strictly more severe than invariant violations. The PreToolUse hook
+  passes both lists to the verifier; on `violated` against a CON-* id
+  the block-reason message explicitly notes that constraints CANNOT be
+  superseded by the agent and must be escalated to the operator.
+- **`render_constraint_snippet` + `render_constraint_markdown`** — and
+  hybrid storage: source of truth is SQLite, with auto-projected
+  `.edp/constraints/CON-NNNN.md` for human/git diff readability (same
+  pattern as decisions).
+- **`/edp-constraints` slash command** for Claude Code.
+- **PROTOCOL_PRIMER updated** — distinguishes the two primitives
+  (CONSTRAINTS vs DECISIONS), documents `edp_constraints` and the
+  no-supersede semantic for axioms.
+- **30 new unit tests** in `test_constraints.py` covering model
+  validation, CRUD round-trip, event log, markdown projection,
+  never-trimmed-in-active-block, MCP mode-gating, verifier prompt
+  shape.
+
+### Changed
+
+- **`_SDK_SCHEMA_VERSION` → 2.** Old v0.2 stores migrate forward on
+  first open; no data migration required (new table + counter only).
+- **`wrap_active_block` signature** — gains `constraint_snippets` +
+  `total_constraints` keyword args (defaults preserve v0.2 behaviour).
+  Footer count line now reads `Constraints: N · Active decisions: M`
+  when at least one constraint exists (was `Active: M`).
+- **`verifier_hook` runs when either invariants OR constraints exist.**
+  v0.2 short-circuited to allow when no decision had invariants; v0.3
+  also runs if any constraint is active.
+
+### Why this is not a major bump
+
+Backwards-compatible at the API level:
+- All v0.2 tools (`edp_record`, `edp_check`, `edp_verify`, `edp_show`,
+  `edp_supersede`) preserve their signatures and behaviour.
+- The `Decision` model is unchanged.
+- Old stores upgrade silently via additive-only schema migration.
+- New behaviour is opt-in: with zero constraints, the active block and
+  verifier output look identical to v0.2.
+
 ## [0.2.0] — 2026-05-25
 
 The "source-doc alignment" release. v0.2 closes the philosophical gap

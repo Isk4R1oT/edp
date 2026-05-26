@@ -10,8 +10,8 @@ import logging
 from dataclasses import dataclass, field
 from typing import Optional
 
-from edp.models import Decision
-from edp.render import render_snippet, wrap_active_block
+from edp.models import Constraint, Decision
+from edp.render import render_constraint_snippet, render_snippet, wrap_active_block
 from edp.store import DecisionNotFound, DecisionStore
 
 _log = logging.getLogger("edp.selector")
@@ -38,6 +38,7 @@ class ActiveBlockResult:
     included: int
     trimmed: int
     decisions: list[Decision] = field(default_factory=list)
+    constraints: list[Constraint] = field(default_factory=list)
 
 
 def get_active_block(
@@ -63,6 +64,18 @@ def get_active_block(
     pol = policy or SelectorPolicy()
     all_active = store.list_active(include_provisional=pol.show_provisional)
     total_active = len(all_active)
+    # Constraints are axioms — always rendered, never trimmed for token budget
+    # (spec §3.8). Tag filter still applies if context_tags is supplied so that
+    # narrow-context turns aren't drowned by unrelated risk rules.
+    all_constraints = store.list_constraints(include_provisional=pol.show_provisional)
+    if context_tags:
+        ctx_set_for_con = set(context_tags)
+        constraints_view = [
+            c for c in all_constraints if not c.tags or ctx_set_for_con.intersection(c.tags)
+        ]
+    else:
+        constraints_view = list(all_constraints)
+    total_constraints = len(constraints_view)
 
     # Step 1 — tag filter
     if context_tags:
@@ -117,12 +130,15 @@ def get_active_block(
         chars_so_far += len(snip) + 1  # +1 for newline
 
     trimmed = len(ordered) - len(included)
+    constraint_snippets = [render_constraint_snippet(c) for c in constraints_view]
     text = wrap_active_block(
         snippets,
         version=version,
         total_active=total_active,
         trimmed=trimmed,
         include_primer=include_primer,
+        constraint_snippets=constraint_snippets,
+        total_constraints=total_constraints,
     )
     return ActiveBlockResult(
         text=text,
@@ -131,4 +147,5 @@ def get_active_block(
         included=len(included),
         trimmed=trimmed,
         decisions=included,
+        constraints=constraints_view,
     )

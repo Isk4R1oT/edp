@@ -6,12 +6,13 @@ Transport: stdio (per §8.3, until fastmcp#4192 resolves on Windows).
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Optional
 
 from fastmcp import FastMCP
 
-from edp.models import CompatibilityReport, Decision, RelevanceReport
+from edp.models import CompatibilityReport, Constraint, Decision, RelevanceReport
 from edp.selector import get_active_block
 from edp.store import DecisionStore
 
@@ -242,13 +243,68 @@ def create_server(store_path: str | Path = ".edp") -> FastMCP:
         from edp.verifier import VerifierUnavailable, verify
 
         active = store.list_active()
+        constraints = store.list_constraints(include_provisional=False)
         try:
-            return verify(planned_action, active)
+            return verify(planned_action, active, active_constraints=constraints)
         except VerifierUnavailable as e:
             return CompatibilityReport(
                 verdict="uncertain",
                 reasoning=f"verifier unavailable: {e}",
                 violated_decision_ids=[],
+            )
+
+    @mcp.tool(annotations=_READ_ANNOTATIONS)
+    def edp_constraints() -> list[Constraint]:
+        """List all active EDP constraints — non-negotiable axioms.
+
+        Constraints are different from decisions: they are permanent axioms
+        the agent MUST never violate. They have no supersede chain, no
+        revision_conditions, no confidence. The verifier treats a constraint
+        violation as more severe than an invariant violation.
+
+        Use this when you want to see the hard rules — risk limits, safety
+        rules, compliance requirements — before taking an action whose
+        legality depends on them. The active block already lists them at
+        the top; this tool returns the structured form.
+
+        Example:
+            edp_constraints()
+              → [Constraint(id="CON-0001", rule="Max leverage 10x", ...)]
+        """
+        return store.list_constraints()
+
+    # Constraint-creation tool is mode-gated. Default (human_only) hides the
+    # write tool entirely so an agent cannot weaken its own axioms. Operators
+    # who want agent-authored constraints set EDP_CONSTRAINT_MODE explicitly.
+    mode = (os.environ.get("EDP_CONSTRAINT_MODE") or "human_only").strip().lower()
+    if mode in ("agent_auto", "agent_provisional"):
+        force_provisional = mode == "agent_provisional"
+
+        @mcp.tool(annotations=_CREATE_ANNOTATIONS)
+        def edp_add_constraint(
+            rule: str,
+            tags: Optional[list[str]] = None,
+        ) -> str:
+            """Add a non-negotiable constraint (axiom). Returns CON-NNNN id.
+
+            Use ONLY for genuine axioms — permanent rules that should never
+            be revised on the fly (risk limits, compliance, safety). For
+            ordinary architectural choices use edp_record (decisions) — those
+            CAN be superseded with rationale; constraints cannot.
+
+            Mode behaviour (EDP_CONSTRAINT_MODE):
+              - agent_auto         — your call creates a confirmed constraint
+              - agent_provisional  — your call creates provisional=true, a
+                                     human confirms via `edp constraint confirm`
+
+            If you find yourself wanting revision_conditions or alternatives,
+            this is not a constraint — use edp_record instead.
+            """
+            return store.add_constraint(
+                rule=rule,
+                tags=tags or [],
+                actor="agent",
+                provisional=force_provisional,
             )
 
     @mcp.resource("decisions://active")
